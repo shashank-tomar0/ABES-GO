@@ -40,6 +40,41 @@ export default function AdminConsole({
 }) {
   const [adminTab, setAdminTab] = useState('students');
 
+  // Dynamic Financial Aggregations
+  let csePaid = 0, cseBilled = 0;
+  let itPaid = 0, itBilled = 0;
+  let ecePaid = 0, eceBilled = 0;
+
+  invoices.forEach(inv => {
+    const studId = inv.studentId || inv.student_id;
+    const stud = students.find(s => s.id === studId);
+    if (!stud) return;
+
+    const prog = stud.program || '';
+    if (prog.includes('Computer Science') || prog.includes('CSE')) {
+      csePaid += inv.amount_paid || 0;
+      cseBilled += inv.total_amount || 0;
+    } else if (prog.includes('Information Technology') || prog.includes('IT')) {
+      itPaid += inv.amount_paid || 0;
+      itBilled += inv.total_amount || 0;
+    } else {
+      ecePaid += inv.amount_paid || 0;
+      eceBilled += inv.total_amount || 0;
+    }
+  });
+
+  const maxPaid = Math.max(csePaid, itPaid, ecePaid, 1);
+
+  const cseFill = `${(csePaid / maxPaid) * 100}%`;
+  const itFill = `${(itPaid / maxPaid) * 100}%`;
+  const eceFill = `${(ecePaid / maxPaid) * 100}%`;
+
+  const totalBilled = invoices.reduce((acc, inv) => acc + (inv.total_amount || 0), 0);
+  const totalPaid = invoices.reduce((acc, inv) => acc + (inv.amount_paid || 0), 0);
+  const realizationRatio = totalBilled > 0 ? Math.round((totalPaid / totalBilled) * 100) : 100;
+  const totalArrears = totalBilled - totalPaid;
+  const arrearsRatio = 100 - realizationRatio;
+
   const timeSlots = [
     { day: 'Monday', time_window: '09:00 - 10:30' },
     { day: 'Monday', time_window: '10:30 - 12:00' },
@@ -471,9 +506,9 @@ export default function AdminConsole({
               
               <div className="qclay-cylinder-chart" aria-hidden="true" style={{ height: '180px', margin: 0 }}>
                 {[
-                  { label: 'CSE Block', amount: '₹112,500', fill: '90%' },
-                  { label: 'IT Block', amount: '₹84,500', fill: '68%' },
-                  { label: 'ECE Block', amount: '₹58,000', fill: '45%' }
+                  { label: 'CSE Block', amount: `₹${csePaid.toLocaleString()}`, fill: cseFill },
+                  { label: 'IT Block', amount: `₹${itPaid.toLocaleString()}`, fill: itFill },
+                  { label: 'ECE Block', amount: `₹${ecePaid.toLocaleString()}`, fill: eceFill }
                 ].map((item, idx) => (
                   <div key={idx} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', width: '22%' }}>
                     <span className="tabular-nums" style={{ fontSize: '11px', color: '#10b981', fontWeight: 700, marginBottom: '6px' }}>{item.amount}</span>
@@ -497,12 +532,12 @@ export default function AdminConsole({
                 <div className="qclay-gauge-circle"></div>
                 <div className="qclay-gauge-circle" style={{ width: '85px', height: '85px', borderDasharray: '2,2' }}></div>
                 <div className="qclay-gauge-dot"></div>
-                <strong className="tabular-nums" style={{ fontSize: '20px', color: '#10b981', position: 'absolute', fontWeight: 600 }}>72%</strong>
+                <strong className="tabular-nums" style={{ fontSize: '20px', color: '#10b981', position: 'absolute', fontWeight: 600 }}>{realizationRatio}%</strong>
               </div>
 
-              <div style={{ display: 'flex', justify: 'space-between', fontSize: '11px', color: 'rgba(255,255,255,0.4)', marginTop: '20px' }}>
-                <span>Overdue: <strong className="tabular-nums" style={{ color: 'var(--danger)' }}>28%</strong></span>
-                <span>Staged: <strong className="tabular-nums" style={{ color: '#fff' }}>₹255,000 Owed</strong></span>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: 'rgba(255,255,255,0.4)', marginTop: '20px' }}>
+                <span>Overdue: <strong className="tabular-nums" style={{ color: 'var(--danger)' }}>{arrearsRatio}%</strong></span>
+                <span>Staged: <strong className="tabular-nums" style={{ color: '#fff' }}>₹{totalArrears.toLocaleString()} Owed</strong></span>
               </div>
             </div>
 

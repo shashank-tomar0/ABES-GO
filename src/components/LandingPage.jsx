@@ -706,6 +706,68 @@ export default function LandingPage({
           </div>
         </section>
       </main>
+
+      {/* Premium Multi-column Footer */}
+      <footer className="qclay-footer" style={{ borderTop: '1px solid rgba(255,255,255,0.04)', background: '#040406', padding: '80px 0 40px 0', marginTop: '120px', position: 'relative', zIndex: 10 }}>
+        <div style={{ maxWidth: '1100px', margin: '0 auto', padding: '0 24px' }}>
+          
+          <div style={{ display: 'grid', gridTemplateColumns: '1.5fr 1fr 1fr 1.2fr', gap: '48px', marginBottom: '60px', flexWrap: 'wrap' }}>
+            
+            {/* Column 1: Brand & tagline */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+              <div className="qclay-logo-wrap" style={{ alignSelf: 'flex-start' }}>
+                <span className="qclay-logo-circle" aria-hidden="true"></span>
+                <span style={{ fontSize: '16px', fontWeight: 800, color: '#fff', letterSpacing: '0.05em' }}>ABES GO</span>
+              </div>
+              <p style={{ fontSize: '12px', color: 'rgba(255,255,255,0.4)', lineHeight: '1.6' }}>
+                An elite, award-winning academic operations portal for ABES Engineering College. Built from first-principles to streamline resource schedulers and geofence proxy preventions.
+              </p>
+            </div>
+
+            {/* Column 2: Navigation quick anchors */}
+            <div>
+              <h4 style={{ fontSize: '11px', color: '#fff', fontWeight: 800, letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: '20px' }}>Academics</h4>
+              <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: '10px', fontSize: '12px' }}>
+                <li><a href="#insights" style={{ color: 'rgba(255,255,255,0.5)', textDecoration: 'none' }} className="footer-link">Schedules Matrix</a></li>
+                <li><a href="#playgrounds" style={{ color: 'rgba(255,255,255,0.5)', textDecoration: 'none' }} className="footer-link">AI Backtracker Sandbox</a></li>
+                <li><a href="#playgrounds" style={{ color: 'rgba(255,255,255,0.5)', textDecoration: 'none' }} className="footer-link">Geofencing Blueprint</a></li>
+              </ul>
+            </div>
+
+            {/* Column 3: Portals */}
+            <div>
+              <h4 style={{ fontSize: '11px', color: '#fff', fontWeight: 800, letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: '20px' }}>Portal Access</h4>
+              <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: '10px', fontSize: '12px' }}>
+                <li><button onClick={() => setShowLoginModal(true)} style={{ background: 'transparent', border: 'none', padding: 0, cursor: 'pointer', color: 'rgba(255,255,255,0.5)' }} className="footer-link">Bursar clearance</button></li>
+                <li><button onClick={() => setShowLoginModal(true)} style={{ background: 'transparent', border: 'none', padding: 0, cursor: 'pointer', color: 'rgba(255,255,255,0.5)' }} className="footer-link">Academic Professor Console</button></li>
+                <li><button onClick={() => setShowLoginModal(true)} style={{ background: 'transparent', border: 'none', padding: 0, cursor: 'pointer', color: 'rgba(255,255,255,0.5)' }} className="footer-link">Student Scholar Hub</button></li>
+              </ul>
+            </div>
+
+            {/* Column 4: Compliance & Auditing */}
+            <div>
+              <h4 style={{ fontSize: '11px', color: '#fff', fontWeight: 800, letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: '20px' }}>Security & Audit</h4>
+              <p style={{ fontSize: '12px', color: 'rgba(255,255,255,0.4)', lineHeight: '1.6' }}>
+                FERPA Compliant Registry Ledger. All transactions, schedules, and attendance events are crypto-signed and audited.
+              </p>
+            </div>
+
+          </div>
+
+          {/* Footer bottom bar */}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderTop: '1px solid rgba(255,255,255,0.03)', paddingTop: '32px', flexWrap: 'wrap', gap: '16px' }}>
+            <span style={{ fontSize: '11px', color: 'rgba(255,255,255,0.3)' }}>
+              © {new Date().getFullYear()} ABES Engineering College. All rights reserved.
+            </span>
+            <div style={{ display: 'flex', gap: '20px', fontSize: '11px' }}>
+              <a href="#verification" style={{ color: 'rgba(255,255,255,0.3)', textDecoration: 'none' }}>Registrar Verification Desk</a>
+              <span style={{ color: 'rgba(255,255,255,0.1)' }}>|</span>
+              <span className="tabular-nums" style={{ color: 'rgba(255,255,255,0.35)', fontWeight: 700 }}>NAAC A+ ACCREDITED</span>
+            </div>
+          </div>
+
+        </div>
+      </footer>
     </div>
   );
 }

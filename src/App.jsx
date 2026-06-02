@@ -4,7 +4,7 @@ import {
   Users, Calendar, DollarSign, Bell, Lock, 
   CheckSquare, Award, List, QrCode, LogOut, CheckCircle, 
   Eye, Shield, FileText, Download, Printer, CreditCard, 
-  Smartphone, Map, TrendingUp, UserCheck, AlertTriangle
+  Smartphone, Map, TrendingUp, UserCheck, AlertTriangle, Sliders
 } from 'lucide-react';
 
 import LandingPage from './components/LandingPage';
@@ -22,6 +22,7 @@ export default function App() {
   // --- SESSION & USER STATES ---
   const [currentUser, setCurrentUser] = useState(null); // { id, email, role }
   const [currentProfile, setCurrentProfile] = useState(null); // Student or Staff details
+  const [showDemoControlRoom, setShowDemoControlRoom] = useState(false);
   const [loginEmail, setLoginEmail] = useState('admin@abes.edu'); 
   const [loginPassword, setLoginPassword] = useState('admin123');
   const [loginError, setLoginError] = useState('');
@@ -163,6 +164,26 @@ export default function App() {
 
       const gradesRes = await fetch(`${API_BASE}/grades`);
       if (gradesRes.ok) setAllGradesList(await gradesRes.json());
+
+      const courseRes = await fetch(`${API_BASE}/courses`);
+      if (courseRes.ok) setCourses(await courseRes.json());
+
+      const roomRes = await fetch(`${API_BASE}/rooms`);
+      if (roomRes.ok) setRooms(await roomRes.json());
+
+      const staffRes = await fetch(`${API_BASE}/staff`);
+      if (staffRes.ok) {
+        const staffData = await staffRes.json();
+        const mappedStaff = staffData.map(s => ({
+          id: s.id,
+          firstName: s.first_name,
+          lastName: s.last_name,
+          employeeIdNumber: s.employee_id_number,
+          department: s.department,
+          contactNumber: s.contact_number
+        }));
+        setStaff(mappedStaff);
+      }
     } catch (err) {
       console.error('Fetch error:', err);
     }
@@ -392,19 +413,31 @@ export default function App() {
       let nextStatus = 'PRESENT';
       if (current === 'PRESENT') nextStatus = 'ABSENT';
       else if (current === 'ABSENT') nextStatus = 'LATE';
-      else if (current === 'LATE') nextStatus = 'EXCUSED';
+      else if (current === 'LATE') nextStatus = 'EXEMPTED';
       return { ...prev, [studentId]: nextStatus };
     });
   };
 
   // Save faculty roster
   const handleSaveFacultyBatch = async () => {
+    const selectedScheduleObj = schedules.find(sc => sc.id === activeLectureSchedule);
+    const courseId = selectedScheduleObj?.course_id;
+    const enrolledStudentIds = allGradesList.filter(g => g.course_id === courseId).map(g => g.student_id);
+    const enrolledStudents = students.filter(s => enrolledStudentIds.includes(s.id));
+    const activeRosterStudents = enrolledStudents.length > 0 ? enrolledStudents : students;
+
+    const records = activeRosterStudents.map(s => ({
+      studentId: s.id,
+      status: facultyRosterList[s.id] || 'PRESENT'
+    }));
+
     if (!isOnline) {
       const offlineTransaction = {
         id: `offline-roster-${Date.now()}`,
         type: 'ROSTER_CALL',
         scheduleId: activeLectureSchedule,
-        roster: facultyRosterList,
+        records,
+        recordedBy: currentProfile?.id || 'staff-01',
         timestamp: Date.now()
       };
       setLocalDirtyQueue(prev => [...prev, offlineTransaction]);
@@ -416,7 +449,11 @@ export default function App() {
       const res = await fetch(`${API_BASE}/attendance/batch`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ scheduleId: activeLectureSchedule, roster: facultyRosterList })
+        body: JSON.stringify({
+          scheduleId: activeLectureSchedule,
+          records,
+          recordedBy: currentProfile?.id || 'staff-01'
+        })
       });
       if (!res.ok) throw new Error('Roster call database save failed.');
 
@@ -498,15 +535,21 @@ export default function App() {
   };
 
   // Scan dynamic geofenced QR
-  const handleScanDynamicQr = () => {
+  const handleScanDynamicQr = (scheduleId = 'sched-01', token = 'MANUAL-TOKEN', lat = 28.6756, lng = 77.4402) => {
     setRadarActive(true);
     setTimeout(async () => {
       setRadarActive(false);
       try {
-        const res = await fetch(`${API_BASE}/attendance/scan-qr`, {
+        const res = await fetch(`${API_BASE}/attendance/qr-sign`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ studentId: currentProfile.id, scheduleId: 'sched-01' })
+          body: JSON.stringify({ 
+            studentId: currentProfile.id, 
+            scheduleId, 
+            token,
+            latitude: lat,
+            longitude: lng
+          })
         });
         const data = await res.json();
         if (!res.ok) throw new Error(data.error?.message || 'Proximity check failed.');
@@ -555,7 +598,11 @@ export default function App() {
           const res = await fetch(`${API_BASE}/attendance/batch`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ scheduleId: item.scheduleId, roster: item.roster })
+            body: JSON.stringify({ 
+              scheduleId: item.scheduleId, 
+              records: item.records, 
+              recordedBy: item.recordedBy 
+            })
           });
           if (!res.ok) throw new Error();
           setSyncProgressLogs(prev => [...prev, `Reconciled roster call transaction ${item.id} committed successfully.`]);
@@ -772,6 +819,14 @@ export default function App() {
             
             <div style={{ display: 'flex', alignItems: 'center', gap: '12px', borderLeft: '1px solid rgba(255,255,255,0.06)', paddingLeft: '20px' }}>
               <span style={{ fontSize: '12px', fontWeight: 600, color: '#fff' }}>{currentUser.email}</span>
+              <button 
+                onClick={() => setShowDemoControlRoom(!showDemoControlRoom)} 
+                className="qclay-btn-pill secondary" 
+                style={{ border: '1px solid rgba(255,255,255,0.08)', padding: '6px 12px', fontSize: '11px', color: 'var(--abes-gold)', display: 'flex', alignItems: 'center', gap: '6px' }}
+                aria-label="Toggle Demo Control Room Drawer"
+              >
+                <Sliders size={12} aria-hidden="true" /> Demo Control
+              </button>
               <button onClick={handleLogout} style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: '#ef4444', display: 'flex', alignItems: 'center', justifyContent: 'center' }} aria-label="End session and sign out">
                 <LogOut size={15} aria-hidden="true" />
               </button>
@@ -817,6 +872,8 @@ export default function App() {
 
         {currentUser.role === 'faculty' && (
           <FacultyConsole 
+            currentUser={currentUser}
+            currentProfile={currentProfile}
             students={students}
             schedules={schedules}
             courses={courses}
@@ -863,93 +920,111 @@ export default function App() {
             setCheckoutInvoice={setCheckoutInvoice}
             handleUploadWireReceipt={handleUploadWireReceipt}
             pushNotification={pushNotification}
+            allGradesList={allGradesList}
           />
         )}
 
       </div>
 
-      {/* RIGHT COLUMN: SIMULATOR OR CONNECTIONS BAR */}
-      <div className="mobile-pane">
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '24px', width: '380px' }}>
-          
-          {/* Synchronized Offline Toast notification logger */}
-          <div className="qclay-card" style={{ padding: '24px', gap: '16px', borderRadius: '24px' }}>
-            <span style={{ fontSize: '10px', fontWeight: 800, color: 'rgba(255,255,255,0.4)', display: 'block', letterSpacing: '0.08em' }}>CORPORATE LOGS & EVENT TRACKS</span>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: '160px', overflowY: 'auto' }} aria-live="polite">
-              {notifications.map(n => (
-                <div key={n.id} style={{ fontSize: '11px', background: 'rgba(255,255,255,0.02)', padding: '8px 12px', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.02)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <span style={{ color: n.type === 'error' ? '#ef4444' : n.type === 'warning' ? 'var(--abes-gold)' : '#fff', fontWeight: 500 }}>{n.message}</span>
-                  <span className="tabular-nums" style={{ color: 'rgba(255,255,255,0.4)', fontSize: '10px' }}>{n.time}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* Sync operations manager block if dirty items exist */}
-          {localDirtyQueue.length > 0 && (
-            <div className="qclay-card" style={{ padding: '20px 24px', border: '1px solid rgba(255,255,255,0.06)', borderRadius: '24px' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%', flexWrap: 'wrap', gap: '12px' }}>
-                <div>
-                  <span className="tabular-nums" style={{ fontSize: '13px', fontWeight: 700, display: 'block', color: '#fff' }}>Unsynced Changes: {localDirtyQueue.length}</span>
-                  <span style={{ fontSize: '11px', color: 'rgba(255,255,255,0.45)' }}>Buffered offline transaction delta.</span>
-                </div>
-                <button className="qclay-btn-pill" style={{ padding: '8px 14px', fontSize: '11px' }} onClick={handleTriggerQueueSync}>
-                  Sync Online
-                </button>
-              </div>
-            </div>
-          )}
-
-          {/* Recruiter verification secure scanner preview block */}
-          <div className="qclay-card" style={{ padding: '24px', borderRadius: '24px', gap: '16px' }}>
-            <h4 style={{ fontSize: '14px', fontWeight: 700, color: 'var(--abes-gold)', letterSpacing: '0.05em', display: 'flex', alignItems: 'center', gap: '6px' }}>
-              <Eye size={14} aria-hidden="true" /> Recruiter Verification Desk
-            </h4>
-            <p style={{ fontSize: '11px', color: 'rgba(255,255,255,0.45)', lineHeight: '1.5' }}>
-              Simulates background recruiter scanning certified student marksheets. Accesses records delta safely.
-            </p>
+      {/* Sliding Demo Control Room Side-Drawer Panel */}
+      {showDemoControlRoom && (
+        <div className="demo-control-drawer">
+          <div className="demo-control-backdrop" onClick={() => setShowDemoControlRoom(false)} />
+          <div className="demo-control-content">
             
-            <form onSubmit={handleEmployerVerifySubmit} style={{ display: 'flex', gap: '8px', width: '100%' }}>
-              <input 
-                aria-label="recruiter student roll id verify input"
-                name="rollNumber"
-                autoComplete="off"
-                type="text" className="qclay-input-capsule" style={{ height: '38px', fontSize: '12px', padding: '6px 12px', flex: 1 }} placeholder="Student Roll ID..."
-                value={employerVerifyId} onChange={e => setEmployerVerifyId(e.target.value)} required
-              />
-              <button type="submit" disabled={employerVerifying} className="qclay-btn-pill" style={{ height: '38px', padding: '8px 16px', fontSize: '12px' }}>
-                Verify
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid rgba(255,255,255,0.06)', paddingBottom: '16px', marginBottom: '8px' }}>
+              <span style={{ fontSize: '13px', fontWeight: 800, color: 'var(--abes-gold)', letterSpacing: '0.08em' }}>DEMO CONTROL ROOM</span>
+              <button 
+                onClick={() => setShowDemoControlRoom(false)}
+                style={{ background: 'transparent', border: 'none', color: 'rgba(255,255,255,0.6)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                aria-label="Close demo settings drawer"
+              >
+                <X size={18} />
               </button>
-            </form>
+            </div>
 
-            {employerVerifyError && (
-              <span style={{ fontSize: '11px', color: '#ef4444', display: 'block' }}>{employerVerifyError}</span>
-            )}
-
-            {employerVerifyResult && (
-              <div className="qclay-card" style={{ padding: '16px', background: '#0c0c12', borderRadius: '16px', border: '1px solid rgba(16,185,129,0.15)', fontSize: '11px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                <span className="qclay-badge-pill success" style={{ fontSize: '9px', alignSelf: 'flex-start' }}>✓ VERIFIED AUTHENTIC</span>
-                <span style={{ color: '#fff' }}>Name: <strong>{employerVerifyResult.student.firstName} {employerVerifyResult.student.lastName}</strong></span>
-                <span style={{ color: 'rgba(255,255,255,0.45)' }}>Program: {employerVerifyResult.student.program}</span>
-                <span className="tabular-nums" style={{ display: 'block', marginTop: '2px', color: 'var(--abes-gold)', fontWeight: 600 }}>Verified SGPA: {employerVerifyResult.sgpa} / 10.0</span>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+              
+              {/* Synchronized Offline Toast notification logger */}
+              <div className="qclay-card" style={{ padding: '24px', gap: '16px', borderRadius: '24px' }}>
+                <span style={{ fontSize: '10px', fontWeight: 800, color: 'rgba(255,255,255,0.4)', display: 'block', letterSpacing: '0.08em' }}>CORPORATE LOGS & EVENT TRACKS</span>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: '160px', overflowY: 'auto' }} aria-live="polite">
+                  {notifications.map(n => (
+                    <div key={n.id} style={{ fontSize: '11px', background: 'rgba(255,255,255,0.02)', padding: '8px 12px', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.02)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <span style={{ color: n.type === 'error' ? '#ef4444' : n.type === 'warning' ? 'var(--abes-gold)' : '#fff', fontWeight: 500 }}>{n.message}</span>
+                      <span className="tabular-nums" style={{ color: 'rgba(255,255,255,0.4)', fontSize: '10px' }}>{n.time}</span>
+                    </div>
+                  ))}
+                </div>
               </div>
-            )}
-          </div>
 
-          {/* Educational Guidelines Info Card */}
-          <div className="qclay-card" style={{ padding: '24px', borderRadius: '24px', gap: '12px' }}>
-            <h4 style={{ fontSize: '14px', fontWeight: 700, color: 'var(--abes-gold)', letterSpacing: '0.05em', display: 'flex', alignItems: 'center', gap: '6px' }}>
-              <Shield size={14} aria-hidden="true" /> Operations Verification Guide
-            </h4>
-            <div style={{ fontSize: '11px', color: 'rgba(255,255,255,0.45)', lineHeight: '1.6', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-              <p>• Authenticate as <strong style={{ color: '#fff' }}>admin@abes.edu</strong> to solve constraint schedules, post bulletins, or clear escrow invoices.</p>
-              <p>• Authenticate as <strong style={{ color: '#fff' }}>sandeep@abes.edu</strong> to record roster attendance, update syllabus completion, or generate check-in tokens.</p>
-              <p>• Authenticate as <strong style={{ color: '#fff' }}>liam@abes.edu</strong> to test check-in geofences, view academic transcripts, or simulate What-If GPA targets.</p>
+              {/* Sync operations manager block if dirty items exist */}
+              {localDirtyQueue.length > 0 && (
+                <div className="qclay-card" style={{ padding: '20px 24px', border: '1px solid rgba(255,255,255,0.06)', borderRadius: '24px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%', flexWrap: 'wrap', gap: '12px' }}>
+                    <div>
+                      <span className="tabular-nums" style={{ fontSize: '13px', fontWeight: 700, display: 'block', color: '#fff' }}>Unsynced Changes: {localDirtyQueue.length}</span>
+                      <span style={{ fontSize: '11px', color: 'rgba(255,255,255,0.45)' }}>Buffered offline transaction delta.</span>
+                    </div>
+                    <button className="qclay-btn-pill" style={{ padding: '8px 14px', fontSize: '11px' }} onClick={handleTriggerQueueSync}>
+                      Sync Online
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Recruiter verification secure scanner preview block */}
+              <div className="qclay-card" style={{ padding: '24px', borderRadius: '24px', gap: '16px' }}>
+                <h4 style={{ fontSize: '14px', fontWeight: 700, color: 'var(--abes-gold)', letterSpacing: '0.05em', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <Eye size={14} aria-hidden="true" /> Recruiter Verification Desk
+                </h4>
+                <p style={{ fontSize: '11px', color: 'rgba(255,255,255,0.45)', lineHeight: '1.5' }}>
+                  Simulates background recruiter scanning certified student marksheets. Accesses records delta safely.
+                </p>
+                
+                <form onSubmit={handleEmployerVerifySubmit} style={{ display: 'flex', gap: '8px', width: '100%' }}>
+                  <input 
+                    aria-label="recruiter student roll id verify input"
+                    name="rollNumber"
+                    autoComplete="off"
+                    type="text" className="qclay-input-capsule" style={{ height: '38px', fontSize: '12px', padding: '6px 12px', flex: 1 }} placeholder="Student Roll ID..."
+                    value={employerVerifyId} onChange={e => setEmployerVerifyId(e.target.value)} required
+                  />
+                  <button type="submit" disabled={employerVerifying} className="qclay-btn-pill" style={{ height: '38px', padding: '8px 16px', fontSize: '12px' }}>
+                    Verify
+                  </button>
+                </form>
+
+                {employerVerifyError && (
+                  <span style={{ fontSize: '11px', color: '#ef4444', display: 'block' }}>{employerVerifyError}</span>
+                )}
+
+                {employerVerifyResult && (
+                  <div className="qclay-card" style={{ padding: '16px', background: '#0c0c12', borderRadius: '16px', border: '1px solid rgba(16,185,129,0.15)', fontSize: '11px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                    <span className="qclay-badge-pill success" style={{ fontSize: '9px', alignSelf: 'flex-start' }}>✓ VERIFIED AUTHENTIC</span>
+                    <span style={{ color: '#fff' }}>Name: <strong>{employerVerifyResult.student.firstName} {employerVerifyResult.student.lastName}</strong></span>
+                    <span style={{ color: 'rgba(255,255,255,0.45)' }}>Program: {employerVerifyResult.student.program}</span>
+                    <span className="tabular-nums" style={{ display: 'block', marginTop: '2px', color: 'var(--abes-gold)', fontWeight: 600 }}>Verified SGPA: {employerVerifyResult.sgpa} / 10.0</span>
+                  </div>
+                )}
+              </div>
+
+              {/* Educational Guidelines Info Card */}
+              <div className="qclay-card" style={{ padding: '24px', borderRadius: '24px', gap: '12px' }}>
+                <h4 style={{ fontSize: '14px', fontWeight: 700, color: 'var(--abes-gold)', letterSpacing: '0.05em', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <Shield size={14} aria-hidden="true" /> Operations Verification Guide
+                </h4>
+                <div style={{ fontSize: '11px', color: 'rgba(255,255,255,0.45)', lineHeight: '1.6', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  <p>• Authenticate as <strong style={{ color: '#fff' }}>admin@abes.edu</strong> to solve constraint schedules, post bulletins, or clear escrow invoices.</p>
+                  <p>• Authenticate as <strong style={{ color: '#fff' }}>sandeep@abes.edu</strong> to record roster attendance, update syllabus completion, or generate check-in tokens.</p>
+                  <p>• Authenticate as <strong style={{ color: '#fff' }}>liam@abes.edu</strong> to test check-in geofences, view academic transcripts, or simulate What-If GPA targets.</p>
+                </div>
+              </div>
+
             </div>
           </div>
-
         </div>
-      </div>
+      )}
 
       {/* Syncing Overlay animation */}
       {syncing && (

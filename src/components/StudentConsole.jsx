@@ -28,11 +28,50 @@ export default function StudentConsole({
   setWhatIfMarks,
   setCheckoutInvoice,
   handleUploadWireReceipt,
-  pushNotification
+  pushNotification,
+  allGradesList = []
 }) {
   const [studentTab, setStudentTab] = useState('home');
   const [manualScannedToken, setManualScannedToken] = useState('');
   const [qrScanningActive, setQrScanningActive] = useState(false);
+
+  // Filter timetables schedules to show only enrolled courses
+  const studentCourseIds = studentGradesData?.grades?.map(g => g.course_id) || [];
+  const studentSchedules = studentCourseIds.length > 0 
+    ? schedules.filter(sc => studentCourseIds.includes(sc.course_id))
+    : schedules;
+
+  // Dynamic Chart calculations based on DB grades
+  const renderChartPath = () => {
+    const grades = studentGradesData?.grades || [];
+    if (grades.length === 0) return { studentPath: "", avgPath: "", points: [] };
+    
+    const xStart = 40;
+    const xEnd = 400;
+    const count = grades.length;
+    const xStep = count > 1 ? (xEnd - xStart) / (count - 1) : 360;
+    
+    const points = grades.map((g, index) => {
+      const x = xStart + index * xStep;
+      const currentSimVal = whatIfMarks[g.course_id] !== undefined ? whatIfMarks[g.course_id] : g.marks_obtained;
+      const studentY = 110 - (currentSimVal / 100) * 80;
+      
+      const courseGrades = allGradesList?.filter(record => record.course_id === g.course_id) || [];
+      const avgMark = courseGrades.length > 0
+        ? courseGrades.reduce((acc, curr) => acc + curr.marks_obtained, 0) / courseGrades.length
+        : g.marks_obtained;
+      const avgY = 110 - (avgMark / 100) * 80;
+      
+      return { code: g.code, x, studentY, avgY, marks: currentSimVal, avgMark: Math.round(avgMark) };
+    });
+    
+    const studentPath = points.map((p, idx) => `${idx === 0 ? 'M' : 'L'} ${p.x} ${p.studentY}`).join(' ');
+    const avgPath = points.map((p, idx) => `${idx === 0 ? 'M' : 'L'} ${p.x} ${p.avgY}`).join(' ');
+    
+    return { studentPath, avgPath, points };
+  };
+
+  const chartData = renderChartPath();
 
   const calculateAttendancePercentage = () => {
     if (studentAttendanceLogs.length === 0) return '100.0';
@@ -350,7 +389,7 @@ export default function StudentConsole({
                     <strong style={{ fontSize: '14px', color: '#fff' }}>Secure Coordinate Check-in</strong>
                     <span className="tabular-nums" style={{ fontSize: '11px', color: 'rgba(255,255,255,0.4)' }}>{new Date(l.timestamp).toLocaleString()}</span>
                   </div>
-                  <span className={`qclay-badge-pill ${l.status === 'PRESENT' ? 'success' : l.status === 'LATE' ? 'warning' : 'danger'}`} style={{ fontSize: '9px' }}>{l.status}</span>
+                  <span className={`qclay-badge-pill ${l.status === 'PRESENT' ? 'success' : l.status === 'LATE' ? 'warning' : l.status === 'EXEMPTED' ? 'neutral' : 'danger'}`} style={{ fontSize: '9px' }}>{l.status}</span>
                 </div>
               ))}
             </div>
@@ -367,7 +406,7 @@ export default function StudentConsole({
           </div>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-            {schedules.map(sc => {
+            {studentSchedules.map(sc => {
               const c = courses.find(item => item.id === sc.course_id);
               const r = rooms.find(item => item.id === sc.room_id);
               return (
@@ -464,21 +503,25 @@ export default function StudentConsole({
                   <line x1="40" y1="100" x2="400" y2="100" stroke="rgba(255,255,255,0.015)" strokeWidth="1" />
 
                   {/* Class Mean Path */}
-                  <path d="M 40 100 L 150 75 L 260 90 L 370 55" fill="none" stroke="rgba(255,255,255,0.15)" strokeWidth="1.5" strokeDasharray="4 4" />
+                  {chartData.avgPath && (
+                    <path d={chartData.avgPath} fill="none" stroke="rgba(255,255,255,0.15)" strokeWidth="1.5" strokeDasharray="4 4" />
+                  )}
                   
-                  {/* Liam Path */}
-                  <path d="M 40 40 L 150 50 L 260 65 L 370 35" fill="none" stroke="#ffffff" strokeWidth="2.5" />
+                  {/* Student Grade Path */}
+                  {chartData.studentPath && (
+                    <path d={chartData.studentPath} fill="none" stroke="#ffffff" strokeWidth="2.5" />
+                  )}
                   
-                  {/* Graph Anchors */}
-                  <circle cx="40" cy="40" r="4.5" fill="#ffffff" stroke="#050508" strokeWidth="1" />
-                  <circle cx="150" cy="50" r="4.5" fill="#ffffff" stroke="#050508" strokeWidth="1" />
-                  <circle cx="260" cy="65" r="4.5" fill="#ffffff" stroke="#050508" strokeWidth="1" />
-                  <circle cx="370" cy="35" r="4.5" fill="#ffffff" stroke="#050508" strokeWidth="1" />
-                  
-                  <text x="40" y="130" fill="rgba(255,255,255,0.3)" fontSize="9" fontWeight="600" textAnchor="middle">CS-601 (A+)</text>
-                  <text x="150" y="130" fill="rgba(255,255,255,0.3)" fontSize="9" fontWeight="600" textAnchor="middle">CS-602 (A)</text>
-                  <text x="260" y="130" fill="rgba(255,255,255,0.3)" fontSize="9" fontWeight="600" textAnchor="middle">IT-601 (B+)</text>
-                  <text x="370" y="130" fill="rgba(255,255,255,0.3)" fontSize="9" fontWeight="600" textAnchor="middle">ME-601 (O)</text>
+                  {/* Graph Anchors & Labels */}
+                  {chartData.points.map((p, idx) => (
+                    <g key={idx}>
+                      <circle cx={p.x} cy={p.studentY} r="4.5" fill="#ffffff" stroke="#050508" strokeWidth="1" />
+                      <circle cx={p.x} cy={p.avgY} r="3" fill="rgba(255,255,255,0.3)" stroke="#050508" strokeWidth="0.5" />
+                      <text x={p.x} y="130" fill="rgba(255,255,255,0.3)" fontSize="9" fontWeight="600" textAnchor="middle">
+                        {p.code} ({p.marks}%)
+                      </text>
+                    </g>
+                  ))}
                   
                   <circle cx="310" cy="15" r="3.5" fill="#ffffff" />
                   <text x="320" y="18" fill="rgba(255,255,255,0.4)" fontSize="9" fontWeight="700">MY GRADE</text>

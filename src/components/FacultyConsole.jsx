@@ -6,6 +6,8 @@ import {
 import { generateTokenSignature } from '../services/crypto';
 
 export default function FacultyConsole({
+  currentUser,
+  currentProfile,
   students,
   schedules,
   courses,
@@ -30,6 +32,44 @@ export default function FacultyConsole({
   const [facultyQrSpinning, setFacultyQrSpinning] = useState(false);
   const [facultyQrToken, setFacultyQrToken] = useState('TOKEN-INIT-101');
   const [facultyRawToken, setFacultyRawToken] = useState('');
+
+  // Filter schedules taught by the logged-in instructor
+  const facultySchedules = schedules.filter(sc => sc.instructor_id === currentProfile?.id);
+  const facultyCourseIds = facultySchedules.map(sc => sc.course_id);
+  const facultyCourses = courses.filter(c => facultyCourseIds.includes(c.id));
+
+  // Determine active schedule's course
+  const activeSchedule = schedules.find(sc => sc.id === activeLectureSchedule);
+  const activeCourseId = activeSchedule ? activeSchedule.course_id : null;
+
+  // Sync activeLectureSchedule to faculty's own schedules
+  useEffect(() => {
+    if (facultySchedules.length > 0) {
+      const exists = facultySchedules.some(sc => sc.id === activeLectureSchedule);
+      if (!exists) {
+        setActiveLectureSchedule(facultySchedules[0].id);
+      }
+    }
+  }, [activeLectureSchedule, facultySchedules, setActiveLectureSchedule]);
+
+  // Sync gradingCourseId to faculty's own courses
+  useEffect(() => {
+    if (facultyCourses.length > 0) {
+      const exists = facultyCourses.some(c => c.id === gradingCourseId);
+      if (!exists) {
+        setGradingCourseId(facultyCourses[0].id);
+      }
+    }
+  }, [gradingCourseId, facultyCourses, setGradingCourseId]);
+
+  // Filter student rows in Roster and Grading panels to show only enrolled students
+  const activeCourseStudents = students.filter(stud => 
+    allGradesList.some(g => g.student_id === stud.id && g.course_id === activeCourseId)
+  );
+
+  const gradingCourseStudents = students.filter(stud => 
+    allGradesList.some(g => g.student_id === stud.id && g.course_id === gradingCourseId)
+  );
 
   // Cryptographic time-decaying dynamic QR rotation
   useEffect(() => {
@@ -115,7 +155,7 @@ export default function FacultyConsole({
                 onChange={e => setActiveLectureSchedule(e.target.value)}
                 style={{ paddingRight: '40px', appearance: 'none', backgroundPosition: 'right 20px center' }}
               >
-                {schedules.map(sc => {
+                {facultySchedules.map(sc => {
                   const c = courses.find(item => item.id === sc.course_id);
                   return <option key={sc.id} value={sc.id} style={{ background: '#09090d', color: '#fff' }}>{c?.code} ({sc.day} - {sc.time_window})</option>
                 })}
@@ -127,43 +167,50 @@ export default function FacultyConsole({
           </div>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-            {students.map(stud => {
-              const st = facultyRosterList[stud.id] || 'PRESENT';
-              let badgeType = 'neutral';
-              if (st === 'PRESENT') badgeType = 'success';
-              else if (st === 'ABSENT') badgeType = 'danger';
-              else if (st === 'LATE') badgeType = 'warning';
+            {activeCourseStudents.length === 0 ? (
+              <div className="qclay-card" style={{ padding: '24px', textAlign: 'center', background: '#0c0c12', color: 'rgba(255,255,255,0.4)', borderRadius: '20px', border: '1px solid rgba(255, 255, 255, 0.04)' }}>
+                No students enrolled in this course module.
+              </div>
+            ) : (
+              activeCourseStudents.map(stud => {
+                const st = facultyRosterList[stud.id] || 'PRESENT';
+                let badgeType = 'neutral';
+                if (st === 'PRESENT') badgeType = 'success';
+                else if (st === 'ABSENT') badgeType = 'danger';
+                else if (st === 'LATE') badgeType = 'warning';
+                else if (st === 'EXEMPTED') badgeType = 'neutral';
 
-              return (
-                <button 
-                  key={stud.id} 
-                  className="qclay-card qclay-hologram-glow" 
-                  style={{ 
-                    width: '100%', 
-                    padding: '16px 24px', 
-                    background: '#0c0c12',
-                    display: 'flex', 
-                    flexDirection: 'row',
-                    justifyContent: 'space-between', 
-                    alignItems: 'center', 
-                    cursor: 'pointer',
-                    borderRadius: '20px',
-                    border: '1px solid rgba(255, 255, 255, 0.04)',
-                    borderLeft: `4px solid ${st === 'PRESENT' ? '#10b981' : st === 'ABSENT' ? '#ef4444' : st === 'LATE' ? '#f59e0b' : 'rgba(255, 255, 255, 0.25)'}`,
-                    color: '#fff',
-                    textAlign: 'left'
-                  }}
-                  onClick={() => handleCycleFacultyRoster(stud.id)}
-                  aria-label={`Cycle attendance status for student ${stud.first_name} ${stud.last_name}`}
-                >
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                    <strong style={{ fontSize: '15px', display: 'block', fontWeight: 600 }}>{stud.first_name} {stud.last_name}</strong>
-                    <span className="tabular-nums" style={{ fontSize: '11px', color: 'rgba(255,255,255,0.4)' }}>Roll Index: {stud.student_id_number}</span>
-                  </div>
-                  <span className={`qclay-badge-pill ${badgeType}`} style={{ fontSize: '10px', minWidth: '80px', justifyContent: 'center' }}>{st}</span>
-                </button>
-              );
-            })}
+                return (
+                  <button 
+                    key={stud.id} 
+                    className="qclay-card qclay-hologram-glow" 
+                    style={{ 
+                      width: '100%', 
+                      padding: '16px 24px', 
+                      background: '#0c0c12',
+                      display: 'flex', 
+                      flexDirection: 'row',
+                      justifyContent: 'space-between', 
+                      alignItems: 'center', 
+                      cursor: 'pointer',
+                      borderRadius: '20px',
+                      border: '1px solid rgba(255, 255, 255, 0.04)',
+                      borderLeft: `4px solid ${st === 'PRESENT' ? '#10b981' : st === 'ABSENT' ? '#ef4444' : st === 'LATE' ? '#f59e0b' : st === 'EXEMPTED' ? 'rgba(255, 255, 255, 0.25)' : 'rgba(255, 255, 255, 0.25)'}`,
+                      color: '#fff',
+                      textAlign: 'left'
+                    }}
+                    onClick={() => handleCycleFacultyRoster(stud.id)}
+                    aria-label={`Cycle attendance status for student ${stud.first_name} ${stud.last_name}`}
+                  >
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                      <strong style={{ fontSize: '15px', display: 'block', fontWeight: 600 }}>{stud.first_name} {stud.last_name}</strong>
+                      <span className="tabular-nums" style={{ fontSize: '11px', color: 'rgba(255,255,255,0.4)' }}>Roll Index: {stud.student_id_number}</span>
+                    </div>
+                    <span className={`qclay-badge-pill ${badgeType}`} style={{ fontSize: '10px', minWidth: '80px', justifyContent: 'center' }}>{st}</span>
+                  </button>
+                );
+              })
+            )}
           </div>
         </div>
       )}
@@ -179,72 +226,78 @@ export default function FacultyConsole({
           <div>
             <label htmlFor="course-selector" style={{ fontSize: '10px', color: 'rgba(255,255,255,0.4)', display: 'block', marginBottom: '8px', fontWeight: 700, letterSpacing: '0.05em' }}>SELECT ACTIVE COURSE MODULE</label>
             <select id="course-selector" className="qclay-input-capsule" value={gradingCourseId} onChange={e => setGradingCourseId(e.target.value)}>
-              {courses.map(c => <option key={c.id} value={c.id} style={{ background: '#09090d', color: '#fff' }}>{c.code} - {c.title}</option>)}
+              {facultyCourses.map(c => <option key={c.id} value={c.id} style={{ background: '#09090d', color: '#fff' }}>{c.code} - {c.title}</option>)}
             </select>
           </div>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-            {students.map(stud => {
-              const currentGradeRecord = allGradesList.find(g => g.student_id === stud.id && g.course_id === gradingCourseId);
-              const officialMark = currentGradeRecord ? currentGradeRecord.marks_obtained : 'Not Set';
-              const officialGrade = currentGradeRecord ? currentGradeRecord.grade_letter : '--';
+            {gradingCourseStudents.length === 0 ? (
+              <div className="qclay-card" style={{ padding: '24px', textAlign: 'center', background: '#0c0c12', color: 'rgba(255,255,255,0.4)', borderRadius: '20px', border: '1px solid rgba(255, 255, 255, 0.04)' }}>
+                No students enrolled in the selected course.
+              </div>
+            ) : (
+              gradingCourseStudents.map(stud => {
+                const currentGradeRecord = allGradesList.find(g => g.student_id === stud.id && g.course_id === gradingCourseId);
+                const officialMark = currentGradeRecord ? currentGradeRecord.marks_obtained : 'Not Set';
+                const officialGrade = currentGradeRecord ? currentGradeRecord.grade_letter : '--';
 
-              const scoreKey = `${stud.id}-${gradingCourseId}`;
-              const customVal = gradingStudentMarks[scoreKey] !== undefined ? gradingStudentMarks[scoreKey] : (currentGradeRecord ? currentGradeRecord.marks_obtained : '');
+                const scoreKey = `${stud.id}-${gradingCourseId}`;
+                const customVal = gradingStudentMarks[scoreKey] !== undefined ? gradingStudentMarks[scoreKey] : (currentGradeRecord ? currentGradeRecord.marks_obtained : '');
 
-              return (
-                <div 
-                  key={stud.id} 
-                  className="qclay-card" 
-                  style={{ 
-                    padding: '20px 24px', 
-                    background: '#0c0c12', 
-                    display: 'flex', 
-                    flexDirection: 'row',
-                    justifyContent: 'space-between', 
-                    alignItems: 'center',
-                    flexWrap: 'wrap',
-                    gap: '16px',
-                    borderRadius: '20px'
-                  }}
-                >
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                    <strong style={{ fontSize: '15px', display: 'block', fontWeight: 600 }}>{stud.first_name} {stud.last_name}</strong>
-                    <span className="tabular-nums" style={{ fontSize: '11px', color: 'rgba(255,255,255,0.4)' }}>Roll Index: {stud.student_id_number}</span>
-                    <span style={{ display: 'block', fontSize: '12px', color: 'var(--abes-gold)', marginTop: '4px', fontWeight: 500 }}>
-                      Registry standing: <strong className="tabular-nums">{officialMark}% ({officialGrade})</strong>
-                    </span>
-                  </div>
-
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                      <input 
-                        aria-label={`Enter marks percentage for student ${stud.first_name} ${stud.last_name}`}
-                        type="number" min="0" max="100" className="qclay-input-capsule" style={{ width: '90px', padding: '10px', fontSize: '13px', textAlign: 'center' }} 
-                        placeholder="Marks %" value={customVal}
-                        onChange={e => setGradingStudentMarks({ ...gradingStudentMarks, [scoreKey]: e.target.value })}
-                        autoComplete="off"
-                        spellCheck={false}
-                      />
-                      <span className="tabular-nums" style={{ fontSize: '13px', color: 'rgba(255,255,255,0.4)' }}>%</span>
+                return (
+                  <div 
+                    key={stud.id} 
+                    className="qclay-card" 
+                    style={{ 
+                      padding: '20px 24px', 
+                      background: '#0c0c12', 
+                      display: 'flex', 
+                      flexDirection: 'row',
+                      justifyContent: 'space-between', 
+                      alignItems: 'center',
+                      flexWrap: 'wrap',
+                      gap: '16px',
+                      borderRadius: '20px'
+                    }}
+                  >
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                      <strong style={{ fontSize: '15px', display: 'block', fontWeight: 600 }}>{stud.first_name} {stud.last_name}</strong>
+                      <span className="tabular-nums" style={{ fontSize: '11px', color: 'rgba(255,255,255,0.4)' }}>Roll Index: {stud.student_id_number}</span>
+                      <span style={{ display: 'block', fontSize: '12px', color: 'var(--abes-gold)', marginTop: '4px', fontWeight: 500 }}>
+                        Registry standing: <strong className="tabular-nums">{officialMark}% ({officialGrade})</strong>
+                      </span>
                     </div>
 
-                    <button 
-                      className="qclay-btn-pill" 
-                      style={{ padding: '8px 18px', fontSize: '12px', height: '40px' }}
-                      disabled={gradingStudentLoading[scoreKey]}
-                      onClick={() => handlePostTermGrade(stud.id, gradingCourseId)}
-                    >
-                      {gradingStudentLoading[scoreKey] ? (
-                        <RefreshCw size={12} className="animate-spin" aria-hidden="true" />
-                      ) : gradingStudentSuccess[scoreKey] ? (
-                        <SaveIcon size={12} style={{ color: '#10b981' }} aria-hidden="true" />
-                      ) : "Post Grade"}
-                    </button>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <input 
+                          aria-label={`Enter marks percentage for student ${stud.first_name} ${stud.last_name}`}
+                          type="number" min="0" max="100" className="qclay-input-capsule" style={{ width: '90px', padding: '10px', fontSize: '13px', textAlign: 'center' }} 
+                          placeholder="Marks %" value={customVal}
+                          onChange={e => setGradingStudentMarks({ ...gradingStudentMarks, [scoreKey]: e.target.value })}
+                          autoComplete="off"
+                          spellCheck={false}
+                        />
+                        <span className="tabular-nums" style={{ fontSize: '13px', color: 'rgba(255,255,255,0.4)' }}>%</span>
+                      </div>
+
+                      <button 
+                        className="qclay-btn-pill" 
+                        style={{ padding: '8px 18px', fontSize: '12px', height: '40px' }}
+                        disabled={gradingStudentLoading[scoreKey]}
+                        onClick={() => handlePostTermGrade(stud.id, gradingCourseId)}
+                      >
+                        {gradingStudentLoading[scoreKey] ? (
+                          <RefreshCw size={12} className="animate-spin" aria-hidden="true" />
+                        ) : gradingStudentSuccess[scoreKey] ? (
+                          <SaveIcon size={12} style={{ color: '#10b981' }} aria-hidden="true" />
+                        ) : "Post Grade"}
+                      </button>
+                    </div>
                   </div>
-                </div>
-              );
-            })}
+                );
+              })
+            )}
           </div>
         </div>
       )}

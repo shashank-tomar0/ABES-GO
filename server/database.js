@@ -107,7 +107,7 @@ db.exec(`
     id TEXT PRIMARY KEY,
     student_id TEXT NOT NULL,
     schedule_id TEXT NOT NULL,
-    status TEXT CHECK(status IN ('PRESENT', 'ABSENT', 'LATE', 'EXCUSED')) NOT NULL,
+    status TEXT CHECK(status IN ('PRESENT', 'ABSENT', 'LATE', 'EXEMPTED')) NOT NULL,
     recorded_by TEXT NOT NULL,
     timestamp TEXT NOT NULL,
     latitude REAL,

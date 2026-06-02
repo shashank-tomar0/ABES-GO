@@ -27,3 +27,7 @@ dist-ssr
 my-clone/
 .agents/
 
+# SQLite databases
+*.db
+server/*.db
+server/abes_erp.db

@@ -300,6 +300,33 @@ app.post('/api/students/bulk-import', (req, res) => {
   }
 });
 
+app.get('/api/courses', (req, res) => {
+  try {
+    const list = db.prepare('SELECT * FROM courses').all();
+    res.json(list);
+  } catch (err) {
+    res.status(500).json({ error: { message: err.message } });
+  }
+});
+
+app.get('/api/rooms', (req, res) => {
+  try {
+    const list = db.prepare('SELECT * FROM rooms').all();
+    res.json(list);
+  } catch (err) {
+    res.status(500).json({ error: { message: err.message } });
+  }
+});
+
+app.get('/api/staff', (req, res) => {
+  try {
+    const list = db.prepare('SELECT * FROM staff').all();
+    res.json(list);
+  } catch (err) {
+    res.status(500).json({ error: { message: err.message } });
+  }
+});
+
 // =========================================================================
 // 3. MASTER CALENDAR TIMETABLE & CONSTRAINTS
 // =========================================================================
@@ -502,6 +529,12 @@ app.post('/api/attendance/batch', (req, res) => {
           rec.latitude || null,
           rec.longitude || null
         );
+
+        // Recalculate attendance rates for this student
+        const total = db.prepare('SELECT COUNT(*) as count FROM attendance WHERE student_id = ?').get(rec.studentId).count;
+        const present = db.prepare("SELECT COUNT(*) as count FROM attendance WHERE student_id = ? AND status IN ('PRESENT', 'LATE')").get(rec.studentId).count;
+        const rate = total > 0 ? (present / total) * 100 : 100.0;
+        db.prepare('UPDATE students SET attendance_rate = ? WHERE id = ?').run(rate, rec.studentId);
       });
       db.exec('COMMIT');
     } catch (txnErr) {
@@ -526,10 +559,22 @@ app.post('/api/attendance/qr-sign', (req, res) => {
   const facultyLng = 77.4402;
 
   if (latitude && longitude) {
-    const latDiff = Math.abs(latitude - facultyLat);
-    const lngDiff = Math.abs(longitude - facultyLng);
+    let isViolated = false;
+    if (latitude > 100) {
+      // Cartesian map coordinate coordinates (checking proximity to CSE Room 102 center which is around x:370, y:90)
+      const distance = Math.sqrt(Math.pow(latitude - 370, 2) + Math.pow(longitude - 90, 2));
+      if (distance > 25) { // 25px range threshold
+        isViolated = true;
+      }
+    } else {
+      const latDiff = Math.abs(latitude - facultyLat);
+      const lngDiff = Math.abs(longitude - facultyLng);
+      if (latDiff > 0.0002 || lngDiff > 0.0002) {
+        isViolated = true;
+      }
+    }
     
-    if (latDiff > 0.0002 || lngDiff > 0.0002) {
+    if (isViolated) {
       logAuditEvent('student@abes.edu', 'PROXIMITY_BLOCKED', `Proximity sign-in failed. Coordinates outside boundary: ${latitude}, ${longitude}`);
       return res.status(403).json({
         error: {
@@ -553,6 +598,12 @@ app.post('/api/attendance/qr-sign', (req, res) => {
       latitude || null,
       longitude || null
     );
+
+    // Recalculate attendance rate
+    const total = db.prepare('SELECT COUNT(*) as count FROM attendance WHERE student_id = ?').get(studentId).count;
+    const present = db.prepare("SELECT COUNT(*) as count FROM attendance WHERE student_id = ? AND status IN ('PRESENT', 'LATE')").get(studentId).count;
+    const rate = total > 0 ? (present / total) * 100 : 100.0;
+    db.prepare('UPDATE students SET attendance_rate = ? WHERE id = ?').run(rate, studentId);
 
     logAuditEvent('student@abes.edu', 'QR_ATTENDANCE_SIGNED', `Student ${studentId} check-in success inside room.`);
     res.json({ success: true, message: 'Class check-in logged.' });
