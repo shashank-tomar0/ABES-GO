@@ -137,3 +137,5 @@ To share and interact with the ERP on your smartphone, tablet, or secondary comp
 1. Identify your local hosting PC's IPv4 address by opening Command Prompt and running `ipconfig` (e.g. `192.168.1.45`).
 2. Open your device's web browser and navigate to `http://<PC-IP>:5173/` (e.g. `http://192.168.1.45:5173/`).
 3. The React Single Page Application will auto-detect the hosting environment and securely route all transaction queries to the backend API running at `http://<PC-IP>:3001`.
+#   A B E S - G O  
+ 
