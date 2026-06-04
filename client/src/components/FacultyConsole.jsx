@@ -4,6 +4,7 @@ import {
   RefreshCw, CheckSquare as SaveIcon
 } from 'lucide-react';
 import { generateTokenSignature } from '../services/crypto';
+import FacultyGPSAttendance from './FacultyGPSAttendance';
 
 export default function FacultyConsole({
   currentUser,
@@ -84,7 +85,7 @@ export default function FacultyConsole({
     if (!internalCourseId || facultyTab !== 'internal') return;
     setInternalLoading(true);
     try {
-      const res = await fetch(`http://localhost:3000/api/internal/${internalCourseId}`, {
+      const res = await fetch(`${import.meta.env.VITE_API_URL}/internal/${internalCourseId}`, {
         headers: { 'x-user-id': currentUser.id, 'x-user-role': currentUser.role }
       });
       const data = await res.json();
@@ -97,7 +98,7 @@ export default function FacultyConsole({
         // Fetch calculations for all students
         const calcs = {};
         for (const stud of activeInternalCourseStudents) {
-          const calcRes = await fetch(`http://localhost:3000/api/internal/${internalCourseId}/${stud.id}`, {
+          const calcRes = await fetch(`${import.meta.env.VITE_API_URL}/internal/${internalCourseId}/${stud.id}`, {
             headers: { 'x-user-id': currentUser.id, 'x-user-role': currentUser.role }
           });
           const calcData = await calcRes.json();
@@ -124,7 +125,7 @@ export default function FacultyConsole({
       else if (type === 'bonus') endpoint = `/api/internal/bonus/${internalCourseId}/${studentId}`;
       else if (type === 'sessional') endpoint = `/api/internal/sessional/${internalCourseId}/${payload.testNumber}/marks`;
 
-      const res = await fetch(`http://localhost:3000${endpoint}`, {
+      const res = await fetch(`${import.meta.env.VITE_API_URL.replace("/api", "")}${endpoint}`, {
         method: 'POST',
         headers: { 
           'Content-Type': 'application/json',
@@ -144,7 +145,7 @@ export default function FacultyConsole({
   const handleCreateQuiz = async (e) => {
     e.preventDefault();
     try {
-      const res = await fetch(`http://localhost:3000/api/internal/quizzes/${internalCourseId}`, {
+      const res = await fetch(`${import.meta.env.VITE_API_URL}/internal/quizzes/${internalCourseId}`, {
         method: 'POST',
         headers: { 
           'Content-Type': 'application/json',
@@ -228,12 +229,12 @@ export default function FacultyConsole({
           <List size={14} aria-hidden="true" /> Course Syllabus Progress
         </button>
         <button 
-          className={`qclay-subnav-item ${facultyTab === 'qr' ? 'active' : ''}`} 
-          onClick={() => setFacultyTab('qr')} 
+          className={`qclay-subnav-item ${facultyTab === 'attendance' ? 'active' : ''}`} 
+          onClick={() => setFacultyTab('attendance')} 
           role="tab"
-          aria-selected={facultyTab === 'qr'}
+          aria-selected={facultyTab === 'attendance'}
         >
-          <QrCode size={14} aria-hidden="true" /> Dynamic QR Broadcast
+          <QrCode size={14} aria-hidden="true" /> Smart GPS Attendance
         </button>
         <button 
           className={`qclay-subnav-item ${facultyTab === 'internal' ? 'active' : ''}`} 
@@ -464,97 +465,14 @@ export default function FacultyConsole({
         </div>
       )}
 
-      {/* Faculty Tab 3: QR Broadcast */}
-      {facultyTab === 'qr' && (
-        <div className="qclay-card qclay-tab-panel" style={{ gap: '28px', alignItems: 'center', textAlign: 'center' }}>
-          <div>
-            <h3 className="display-title" style={{ fontSize: '20px', marginBottom: '8px' }}>Dynamic Cryptographic QR Token Broadcaster</h3>
-            <span style={{ fontSize: '12px', color: 'rgba(255,255,255,0.45)', maxWidth: '540px', display: 'block', margin: '0 auto' }}>
-              Broadcast secure, geofenced one-time check-in tokens. System auto-recalculates signature profiles every **15 seconds** with dynamic coordinates mapping.
-            </span>
-          </div>
-
-          {/* Concentric 3D Wireframe Vector Widget */}
-          <div style={{ position: 'relative', width: '260px', height: '260px', margin: '12px 0', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            
-            {/* Outer Concentric Spinning Ring */}
-            <svg 
-              width="260" 
-              height="260" 
-              style={{ position: 'absolute', top: 0, left: 0, transform: 'rotate(0deg)', transition: 'transform 0.5s ease', animation: facultyQrSpinning ? 'spin 16s linear infinite' : 'none' }}
-            >
-              <circle cx="130" cy="130" r="110" fill="none" stroke="rgba(255, 255, 255, 0.03)" strokeWidth="1" />
-              <circle cx="130" cy="130" r="110" fill="none" stroke="rgba(255, 255, 255, 0.12)" strokeWidth="1.5" strokeDasharray="30 150" />
-            </svg>
-            
-            {/* Middle Reverse Ring */}
-            <svg 
-              width="260" 
-              height="260" 
-              style={{ position: 'absolute', top: 0, left: 0, transform: 'rotate(0deg)', transition: 'transform 0.5s ease', animation: facultyQrSpinning ? 'spin 10s linear infinite reverse' : 'none' }}
-            >
-              <circle cx="130" cy="130" r="85" fill="none" stroke="rgba(255, 255, 255, 0.02)" strokeWidth="1" />
-              <circle cx="130" cy="130" r="85" fill="none" stroke="rgba(255, 255, 255, 0.22)" strokeWidth="1.5" strokeDasharray="20 80" />
-            </svg>
-
-            {/* Orbiting Orb Meter */}
-            <div className="qclay-gauge-wrap" style={{ width: '220px', height: '220px', position: 'absolute' }}>
-              <div className="qclay-gauge-circle" style={{ border: '1px solid rgba(255,255,255,0.01)' }}></div>
-              {facultyQrSpinning && <div className="qclay-gauge-dot" style={{ animationDuration: '7s' }}></div>}
-            </div>
-
-            {/* Secure Code payload center block */}
-            <div style={{ position: 'absolute', zIndex: 10, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
-              <QrCode size={105} color={facultyQrSpinning ? '#ffffff' : 'rgba(255,255,255,0.2)'} />
-            </div>
-
-            {facultyQrSpinning && (
-              <div 
-                title={facultyRawToken}
-                style={{ 
-                  position: 'absolute', bottom: '15px', left: '50%', transform: 'translateX(-50%)', 
-                  background: '#ffffff', color: '#040406', fontSize: '11px', padding: '6px 14px', 
-                  borderRadius: '9999px', fontWeight: 800, whiteSpace: 'nowrap', maxWidth: '180px', 
-                  overflow: 'hidden', textOverflow: 'ellipsis', border: '1px solid rgba(255,255,255,0.1)',
-                  boxShadow: '0 8px 24px rgba(0,0,0,0.5)'
-                }}
-              >
-                {facultyQrToken}
-              </div>
-            )}
-          </div>
-
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', width: '100%', alignItems: 'center' }}>
-            <button 
-              className="qclay-btn-pill" 
-              style={{ background: facultyQrSpinning ? '#ef4444' : '#ffffff', color: facultyQrSpinning ? '#ffffff' : '#040406' }} 
-              onClick={() => {
-                setFacultyQrSpinning(!facultyQrSpinning);
-                pushNotification('info', facultyQrSpinning ? 'Secure QR token broadcast terminated.' : 'Dynamic coordinates verification active.');
-              }}
-            >
-              {facultyQrSpinning ? "Terminate Token Broadcast" : "Initialize Secure QR Broadcast"}
-            </button>
-
-            {facultyQrSpinning && (
-              <div 
-                className="qclay-card" 
-                style={{ 
-                  width: '100%', 
-                  maxWidth: '540px', 
-                  padding: '16px 20px', 
-                  background: '#0c0c12', 
-                  borderRadius: '16px',
-                  border: '1px solid rgba(255, 255, 255, 0.04)'
-                }}
-              >
-                <span className="tabular-nums" style={{ fontSize: '11px', color: 'rgba(255,255,255,0.4)', display: 'block', wordBreak: 'break-all', fontFamily: 'monospace' }}>
-                  Dynamic Cryptographic Payload Signature: <strong style={{ color: '#fff' }}>{facultyRawToken}</strong>
-                </span>
-              </div>
-            )}
-          </div>
-        </div>
+      {/* Faculty Tab 3: GPS Attendance */}
+      {facultyTab === 'attendance' && (
+        <FacultyGPSAttendance 
+          currentUser={currentUser}
+          courses={courses}
+          schedules={schedules}
+          pushNotification={pushNotification}
+        />
       )}
 
       {/* Faculty Tab 4: Internal Marks Portal */}

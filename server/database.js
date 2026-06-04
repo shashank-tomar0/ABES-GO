@@ -21,6 +21,13 @@ console.log(`Database engine initialized at: ${dbPath}`);
 
 // Force fresh DDL load to populate full working page long mock datasets
 db.exec(`
+  DROP TABLE IF EXISTS location_history;
+  DROP TABLE IF EXISTS fcm_tokens;
+  DROP TABLE IF EXISTS attendance_audit;
+  DROP TABLE IF EXISTS late_join_requests;
+  DROP TABLE IF EXISTS device_registry;
+  DROP TABLE IF EXISTS attendance_responses;
+  DROP TABLE IF EXISTS attendance_sessions;
   DROP TABLE IF EXISTS internal_marks_lock;
   DROP TABLE IF EXISTS bonus_marks;
   DROP TABLE IF EXISTS attendance_mark_config;
@@ -273,6 +280,112 @@ db.exec(`
     locked_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY(course_id) REFERENCES courses(id) ON DELETE CASCADE
   );
+
+  CREATE TABLE IF NOT EXISTS attendance_sessions (
+    id TEXT PRIMARY KEY,
+    schedule_id TEXT NOT NULL,
+    faculty_id TEXT NOT NULL,
+    anchor_lat REAL NOT NULL,
+    anchor_lng REAL NOT NULL,
+    opened_at TEXT NOT NULL,
+    expires_at TEXT NOT NULL,
+    status TEXT CHECK(status IN ('OPEN','CLOSED','SUBMITTED')) DEFAULT 'OPEN',
+    qr_fallback_enabled INTEGER DEFAULT 0,
+    qr_token TEXT,
+    submitted_at TEXT,
+    FOREIGN KEY(schedule_id) REFERENCES schedules(id),
+    FOREIGN KEY(faculty_id) REFERENCES staff(id)
+  );
+
+  CREATE TABLE IF NOT EXISTS attendance_responses (
+    id TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL,
+    student_id TEXT NOT NULL,
+    responded_at TEXT NOT NULL,
+    latitude REAL,
+    longitude REAL,
+    distance_m REAL,
+    attempt_count INTEGER DEFAULT 1,
+    auto_status TEXT CHECK(auto_status IN ('PRESENT','OUT_OF_RANGE','FLAGGED')),
+    final_status TEXT CHECK(final_status IN ('PRESENT','ABSENT','LATE','EXCUSED')),
+    flag_reason TEXT,
+    overridden_by TEXT,
+    overridden_at TEXT,
+    UNIQUE(session_id, student_id),
+    FOREIGN KEY(session_id) REFERENCES attendance_sessions(id),
+    FOREIGN KEY(student_id) REFERENCES students(id),
+    FOREIGN KEY(overridden_by) REFERENCES staff(id)
+  );
+
+  CREATE TABLE IF NOT EXISTS device_registry (
+    id TEXT PRIMARY KEY,
+    student_id TEXT NOT NULL UNIQUE,
+    device_fingerprint TEXT NOT NULL,
+    device_token TEXT UNIQUE NOT NULL,
+    registered_at TEXT NOT NULL,
+    last_active TEXT NOT NULL,
+    switch_count INTEGER DEFAULT 0,
+    is_trusted INTEGER DEFAULT 1,
+    FOREIGN KEY(student_id) REFERENCES students(id)
+  );
+
+  CREATE TABLE IF NOT EXISTS late_join_requests (
+    id TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL,
+    student_id TEXT NOT NULL,
+    reason TEXT NOT NULL,
+    requested_at TEXT NOT NULL,
+    status TEXT CHECK(status IN ('PENDING','APPROVED','DENIED')) DEFAULT 'PENDING',
+    reviewed_by TEXT,
+    reviewed_at TEXT,
+    FOREIGN KEY(session_id) REFERENCES attendance_sessions(id),
+    FOREIGN KEY(student_id) REFERENCES students(id),
+    FOREIGN KEY(reviewed_by) REFERENCES staff(id)
+  );
+
+  CREATE TABLE IF NOT EXISTS attendance_audit (
+    id TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL,
+    student_id TEXT NOT NULL,
+    action TEXT NOT NULL,
+    previous_status TEXT,
+    new_status TEXT,
+    performed_by TEXT NOT NULL,
+    device_id TEXT,
+    performed_at TEXT NOT NULL,
+    reason TEXT,
+    FOREIGN KEY(session_id) REFERENCES attendance_sessions(id)
+  );
+
+  CREATE TABLE IF NOT EXISTS fcm_tokens (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL UNIQUE,
+    fcm_token TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY(user_id) REFERENCES users(id)
+  );
+
+  CREATE TABLE IF NOT EXISTS location_history (
+    id TEXT PRIMARY KEY,
+    student_id TEXT NOT NULL,
+    latitude REAL NOT NULL,
+    longitude REAL NOT NULL,
+    recorded_at TEXT NOT NULL,
+    FOREIGN KEY(student_id) REFERENCES students(id)
+  );
+
+  CREATE TRIGGER IF NOT EXISTS keep_last_10_locations 
+  AFTER INSERT ON location_history 
+  BEGIN
+      DELETE FROM location_history 
+      WHERE student_id = NEW.student_id 
+      AND id NOT IN (
+          SELECT id FROM location_history 
+          WHERE student_id = NEW.student_id 
+          ORDER BY recorded_at DESC 
+          LIMIT 10
+      );
+  END;
 
   CREATE INDEX IF NOT EXISTS idx_students_user_id ON students(user_id);
   CREATE INDEX IF NOT EXISTS idx_attendance_student_id ON attendance(student_id);

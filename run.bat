@@ -7,19 +7,34 @@ echo.
 cd /d "%~dp0"
 
 echo [1/3] Checking Node.js dependencies...
-if not exist "node_modules" (
-    echo Dependencies not found. Installing node packages...
+if not exist "client\node_modules" (
+    echo Frontend dependencies not found. Installing node packages...
+    cd client
     call npm install
+    cd ..
 ) else (
-    echo Dependencies are already installed.
+    echo Frontend dependencies are already installed.
+)
+
+if not exist "server\node_modules" (
+    echo Backend dependencies not found. Installing node packages...
+    cd server
+    call npm install
+    cd ..
+) else (
+    echo Backend dependencies are already installed.
 )
 echo.
 
 echo [2/3] Starting backend Express database server...
-start "ABES GO Backend Server" cmd /k "npm run server"
+cd server
+start "ABES GO Backend Server" cmd /k "npm start"
+cd ..
 
 echo [3/3] Starting frontend Vite client dashboard...
+cd client
 start "ABES GO Frontend Client" cmd /k "npm run dev"
+cd ..
 echo.
 
 echo ==========================================================

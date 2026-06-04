@@ -5,6 +5,7 @@ import {
   Upload, Download, Smartphone
 } from 'lucide-react';
 import { verifyTokenSignature, calculateGeodistance } from '../services/crypto';
+import StudentGPSAttendance from './StudentGPSAttendance';
 
 export default function StudentConsole({
   currentUser,
@@ -56,7 +57,7 @@ export default function StudentConsole({
   React.useEffect(() => {
     if (internalCourseId && studentTab === 'internal') {
       setInternalLoading(true);
-      fetch(`http://localhost:3000/api/internal/${internalCourseId}/${currentProfile.id}`, {
+      fetch(`${import.meta.env.VITE_API_URL}/internal/${internalCourseId}/${currentProfile.id}`, {
         headers: { 'x-user-id': currentUser.id, 'x-user-role': currentUser.role }
       })
       .then(res => res.json())
@@ -322,119 +323,14 @@ export default function StudentConsole({
               </div>
             </div>
 
-            {/* Anti-cheat Proximity Sign-in */}
-            <div className="qclay-card" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between', gap: '20px' }}>
-              <div>
-                <h4 style={{ fontSize: '14px', fontWeight: 700, color: 'var(--abes-gold)', marginBottom: '8px', letterSpacing: '0.05em' }}>ANTI-CHEAT GEOFENCE SWEEP</h4>
-                <p style={{ fontSize: '11px', color: 'rgba(255,255,255,0.4)', lineHeight: '1.5' }}>Proximity sweep requires user GPS coordinates to fall within a 15-meter threshold of Lecture Room 102.</p>
-                
-                <div style={{ margin: '16px 0' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', marginBottom: '8px' }}>
-                    <span className="tabular-nums">GPS Proximity: <strong>{gpsSlider}m</strong></span>
-                    <span style={{ color: gpsSlider > 15 ? '#ef4444' : '#10b981', fontWeight: 700 }}>{gpsSlider > 15 ? "OUT OF BOUNDS" : "INSIDE GEOFENCE"}</span>
-                  </div>
-                  <input 
-                    aria-label="Set classroom proximity GPS distance slider"
-                    type="range" min="3" max="40" value={gpsSlider} 
-                    onChange={e => setGpsSlider(Number(e.target.value))} 
-                    style={{ 
-                      width: '100%', 
-                      accentColor: '#ffffff',
-                      height: '4px',
-                      background: 'rgba(255,255,255,0.05)',
-                      borderRadius: '2px',
-                      outline: 'none'
-                    }} 
-                  />
-                </div>
-              </div>
+            {/* Smart GPS Attendance Widget */}
+            <StudentGPSAttendance 
+              currentUser={currentUser}
+              courses={courses}
+              schedules={schedules}
+              pushNotification={pushNotification}
+            />
 
-              {qrScanningActive ? (
-                <form onSubmit={handlePerformAntiCheatCheckin} style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                  <input 
-                    aria-label="Enter dynamic raw QR checkin token"
-                    type="text" className="qclay-input-capsule" style={{ fontSize: '11px', padding: '10px 16px' }}
-                    placeholder="Paste broadcast payload signature..."
-                    value={manualScannedToken} 
-                    onChange={e => setManualScannedToken(e.target.value)} 
-                    required
-                    autoComplete="off"
-                    spellCheck={false}
-                  />
-                  <div style={{ display: 'flex', gap: '8px' }}>
-                    <button type="submit" className="qclay-btn-pill" style={{ flex: 1, padding: '8px 12px', fontSize: '12px' }}>Verify Signature</button>
-                    <button type="button" className="qclay-btn-pill secondary" style={{ padding: '8px 14px', fontSize: '12px' }} onClick={() => setQrScanningActive(false)}>X</button>
-                  </div>
-                </form>
-              ) : (
-                <button 
-                  className="qclay-btn-pill" 
-                  onClick={() => setQrScanningActive(true)}
-                  style={{ width: '100%', background: '#ffffff', color: '#040406' }}
-                >
-                  Scan Dynamic QR Token
-                </button>
-              )}
-            </div>
-
-          </div>
-
-          {/* Premium Vector Blueprint Map with Radar Pulse */}
-          <div className="qclay-card" style={{ gap: '20px' }}>
-            <div>
-              <h3 className="display-title" style={{ fontSize: '20px', marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '10px' }}>
-                <Map size={18} aria-hidden="true" style={{ color: '#fff' }} /> Geofencing Real-time Blueprint Map
-              </h3>
-              <span style={{ fontSize: '12px', color: 'rgba(255,255,255,0.45)' }}>Vector grid representation displaying target classroom anchors and scholar coordinate alignment.</span>
-            </div>
-            
-            <div style={{ display: 'flex', justifyContent: 'center', width: '100%' }}>
-              <svg width="100%" height="220" viewBox="0 0 480 220" style={{ background: '#050508', border: '1px solid rgba(255,255,255,0.03)', borderRadius: '20px' }} aria-hidden="true">
-                <defs>
-                  <pattern id="grid" width="20" height="20" patternUnits="userSpaceOnUse">
-                    <path d="M 20 0 L 0 0 0 20" fill="none" stroke="rgba(255, 255, 255, 0.015)" strokeWidth="1" />
-                  </pattern>
-                </defs>
-                <rect width="100%" height="100%" fill="url(#grid)" />
-                
-                {/* Block 1 */}
-                <rect x="30" y="30" width="130" height="110" rx="16" fill="rgba(255,255,255,0.01)" stroke="rgba(255,255,255,0.05)" strokeWidth="1.5" />
-                <text x="95" y="85" fill="rgba(255,255,255,0.3)" fontSize="10" fontWeight="700" textAnchor="middle" letterSpacing="0.05em">B-BLOCK LAB</text>
-                
-                {/* Room 102 Area */}
-                <rect x="290" y="30" width="160" height="120" rx="16" fill="rgba(255,255,255,0.01)" stroke={gpsSlider > 15 ? "rgba(239,68,68,0.2)" : "rgba(255,255,255,0.1)"} strokeWidth="1.5" />
-                <text x="370" y="85" fill={gpsSlider > 15 ? "#ef4444" : "#ffffff"} fontSize="10" fontWeight="700" textAnchor="middle" letterSpacing="0.05em">CSE ROOM 102</text>
-                
-                {/* Proximity Circle */}
-                <circle cx="370" cy="90" r="35" fill="none" stroke="rgba(255,255,255,0.05)" strokeWidth="1" strokeDasharray="4 4" />
-                <circle cx="370" cy="90" r="3.5" fill="#ffffff" />
-                
-                {/* Dynamic radar animation waves */}
-                {radarActive && (
-                  <circle cx={gpsSlider <= 15 ? 370 : 200} cy={gpsSlider <= 15 ? 90 : 105} r="4" fill="none" stroke={gpsSlider <= 15 ? "#ffffff" : "#ef4444"} strokeWidth="1.5">
-                    <animate attributeName="r" values="4;70" dur="2.2s" repeatCount="indefinite" />
-                    <animate attributeName="opacity" values="0.8;0" dur="2.2s" repeatCount="indefinite" />
-                  </circle>
-                )}
-                
-                {/* Active Student position node */}
-                {gpsSlider <= 15 ? (
-                  <g transform="translate(370, 90)">
-                    <circle cx="0" cy="0" r="10" fill="#ffffff" opacity="0.15" />
-                    <circle cx="0" cy="0" r="5" fill="#ffffff" />
-                  </g>
-                ) : (
-                  <g transform="translate(200, 105)">
-                    <circle cx="0" cy="0" r="10" fill="#ef4444" opacity="0.15" />
-                    <circle cx="0" cy="0" r="5" fill="#ef4444" />
-                  </g>
-                )}
-                
-                <text x="240" y="195" fill="rgba(255,255,255,0.3)" fontSize="10" fontWeight="500" textAnchor="middle">
-                  {gpsSlider <= 15 ? "Scholar geofence verified. Signature sequence active." : "Proximity Warning: Outside target classroom parameters."}
-                </text>
-              </svg>
-            </div>
           </div>
 
           {/* Verification Logs list */}

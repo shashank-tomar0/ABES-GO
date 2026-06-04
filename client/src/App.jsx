@@ -16,7 +16,7 @@ import { solveTimetableCSP } from './services/timetable';
 
 const API_BASE = typeof window !== 'undefined' && window.location.hostname 
   ? `http://${window.location.hostname}:3001/api` 
-  : 'http://localhost:3001/api';
+  : `${import.meta.env.VITE_API_URL}`;
 
 export default function App() {
   // --- SESSION & USER STATES ---

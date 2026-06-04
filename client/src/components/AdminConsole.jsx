@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import AdminGPSAttendanceAudit from './AdminGPSAttendanceAudit';
 import { 
   Users, Calendar, DollarSign, Bell, Lock, Plus, Layers, 
   RefreshCw, Database, AlertTriangle, TrendingUp, CheckCircle, 
@@ -47,7 +48,7 @@ export default function AdminConsole({
   React.useEffect(() => {
     if (adminTab === 'attendance' && currentUser) {
       courses.forEach(c => {
-        fetch(`http://localhost:3000/api/internal/attendance-config/${c.id}`, {
+        fetch(`${import.meta.env.VITE_API_URL}/internal/attendance-config/${c.id}`, {
           headers: { 'x-user-id': currentUser.id, 'x-user-role': currentUser.role }
         })
         .then(res => res.json())
@@ -71,7 +72,7 @@ export default function AdminConsole({
     setConfigSaving(prev => ({ ...prev, [courseId]: true }));
     try {
       const config = attendanceConfigs[courseId];
-      const res = await fetch(`http://localhost:3000/api/internal/attendance-config/${courseId}`, {
+      const res = await fetch(`${import.meta.env.VITE_API_URL}/internal/attendance-config/${courseId}`, {
         method: 'PUT',
         headers: { 
           'Content-Type': 'application/json',
@@ -204,6 +205,9 @@ export default function AdminConsole({
         </button>
         <button className={`qclay-subnav-item ${adminTab === 'audit' ? 'active' : ''}`} onClick={() => setAdminTab('audit')}>
           <Lock size={14} aria-hidden="true" /> System Audit Trails
+        </button>
+        <button className={`qclay-subnav-item ${adminTab === 'gps-audit' ? 'active' : ''}`} onClick={() => setAdminTab('gps-audit')}>
+          <MapPin size={14} aria-hidden="true" /> GPS Attendance Audit
         </button>
         <button className={`qclay-subnav-item ${adminTab === 'attendance' ? 'active' : ''}`} onClick={() => setAdminTab('attendance')}>
           <CheckCircle size={14} aria-hidden="true" /> Attendance Marks Config
@@ -464,14 +468,24 @@ export default function AdminConsole({
                                 </div>
                                 <span style={{ fontSize: '12px', display: 'block', marginTop: '4px', fontWeight: 600, color: '#fff' }}>{c?.title}</span>
                                 <span style={{ fontSize: '11px', color: 'rgba(255,255,255,0.4)', display: 'block', marginTop: '6px' }}>Room: {r?.name}</span>
-                              </div>
-                            );
-                          })}
+                          
+      {/* Tab 7: GPS Attendance Audit */}
+      {adminTab === 'gps-audit' && (
+        <AdminGPSAttendanceAudit currentUser={currentUser} />
+      )}
+    </div>
+  );
+})}
                         </div>
                       )}
-                    </div>
-                  );
-                })}
+                
+      {/* Tab 7: GPS Attendance Audit */}
+      {adminTab === 'gps-audit' && (
+        <AdminGPSAttendanceAudit currentUser={currentUser} />
+      )}
+    </div>
+  );
+})}
               </div>
             </div>
           </div>
@@ -520,9 +534,14 @@ export default function AdminConsole({
                           }}
                         >
                           {occupancyVal}
-                        </div>
-                      );
-                    })}
+                    
+      {/* Tab 7: GPS Attendance Audit */}
+      {adminTab === 'gps-audit' && (
+        <AdminGPSAttendanceAudit currentUser={currentUser} />
+      )}
+    </div>
+  );
+})}
                   </div>
                 ))}
               </div>
@@ -822,6 +841,11 @@ export default function AdminConsole({
         </div>
       )}
 
+
+      {/* Tab 7: GPS Attendance Audit */}
+      {adminTab === 'gps-audit' && (
+        <AdminGPSAttendanceAudit currentUser={currentUser} />
+      )}
     </div>
   );
 }

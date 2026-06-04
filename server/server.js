@@ -1,7 +1,11 @@
+import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
 import crypto from 'node:crypto';
+import http from 'http';
+import { WebSocketServer } from 'ws';
 import { db } from './database.js';
+import { setupGPSAttendance } from './gps.js';
 
 const app = express();
 const PORT = 3001;
@@ -1268,6 +1272,31 @@ app.get('/api/internal/:courseId', requireAuth, (req, res) => {
   }
 });
 
-app.listen(PORT, () => {
+const server = http.createServer(app);
+const wss = new WebSocketServer({ server });
+
+wss.on('connection', (ws, req) => {
+  // basic auth simulation from query params
+  const url = new URL(req.url, 'http://localhost');
+  const token = url.searchParams.get('token');
+  const sessionId = url.searchParams.get('session_id');
+  
+  if (!token || !sessionId) {
+    ws.close();
+    return;
+  }
+  
+  // Here we would verify the JWT. For now, since there's no JWT, we just accept if token is provided.
+  // In a real app: jwt.verify(token, process.env.JWT_SECRET)
+  // Associate ws with faculty
+  // mock for now:
+  ws.session_id = sessionId;
+  ws.faculty_id = 'staff-01'; // Mock association
+});
+
+// Setup GPS endpoints
+setupGPSAttendance(app, db, wss);
+
+server.listen(PORT, () => {
   console.log(`Express ERP server active and listening on port ${PORT}`);
 });
