@@ -65,6 +65,36 @@ function logAuditEvent(email, action, details) {
   }
 }
 
+// --- MIDDLEWARE: Simple Auth via Headers (as agreed due to missing JWT) ---
+const requireAuth = (req, res, next) => {
+  const userId = req.headers['x-user-id'];
+  const userRole = req.headers['x-user-role'];
+  if (!userId || !userRole) {
+    return res.status(401).json({ error: { message: 'Unauthorized. Missing authentication headers.' } });
+  }
+  req.user = { id: userId, role: userRole };
+  next();
+};
+
+const requireAdmin = (req, res, next) => {
+  if (req.user.role !== 'admin') {
+    return res.status(403).json({ error: { message: 'Forbidden. Admin role required.' } });
+  }
+  next();
+};
+
+function isCourseLocked(courseId) {
+  const lock = db.prepare('SELECT * FROM internal_marks_lock WHERE course_id = ?').get(courseId);
+  return !!lock;
+}
+
+function isFacultyAssigned(courseId, userId) {
+  const staff = db.prepare('SELECT id FROM staff WHERE user_id = ?').get(userId);
+  if (!staff) return false;
+  const sched = db.prepare('SELECT * FROM schedules WHERE course_id = ? AND instructor_id = ?').get(courseId, staff.id);
+  return !!sched;
+}
+
 // =========================================================================
 // 1. AUTHENTICATION MODULE
 // =========================================================================
@@ -946,6 +976,295 @@ app.post('/api/sync', (req, res) => {
     res.json({ success: true, message: `Successfully synchronized ${changes.length} local offline mutations.` });
   } catch (err) {
     res.status(500).json({ error: { message: err.message } });
+  }
+});
+
+// =========================================================================
+// 8. INTERNAL MARKS SYSTEM
+// =========================================================================
+
+// Helpers for validation
+const checkLockAndFaculty = (courseId, req, res) => {
+  if (isCourseLocked(courseId)) {
+    res.status(403).json({ error: { message: 'Course marks are locked by admin.' } });
+    return false;
+  }
+  if (req.user.role !== 'admin' && !isFacultyAssigned(courseId, req.user.id)) {
+    res.status(403).json({ error: { message: 'You are not assigned to this course.' } });
+    return false;
+  }
+  return true;
+};
+
+app.post('/api/internal/assignments/:courseId/:studentId/marks', requireAuth, (req, res) => {
+  const { courseId, studentId } = req.params;
+  const { assignmentId, marksObtained } = req.body;
+  if (!checkLockAndFaculty(courseId, req, res)) return;
+
+  try {
+    const id = 'asub-' + generateUUID();
+    db.prepare(`
+      INSERT INTO assignment_submissions (id, assignment_id, student_id, marks_obtained, status)
+      VALUES (?, ?, ?, ?, 'SUBMITTED')
+      ON CONFLICT(assignment_id, student_id) DO UPDATE SET marks_obtained = excluded.marks_obtained, status = 'SUBMITTED', submitted_at = CURRENT_TIMESTAMP
+    `).run(id, assignmentId, studentId, marksObtained);
+    res.json({ success: true, message: 'Assignment marks updated.' });
+  } catch (err) {
+    sendErrorResponse(res, err);
+  }
+});
+
+app.post('/api/internal/quizzes/:courseId', requireAuth, (req, res) => {
+  const { courseId } = req.params;
+  const { title, maxMarks } = req.body;
+  if (!checkLockAndFaculty(courseId, req, res)) return;
+
+  try {
+    const id = 'quiz-' + generateUUID();
+    db.prepare('INSERT INTO quizzes (id, course_id, title, max_marks, created_by) VALUES (?, ?, ?, ?, ?)')
+      .run(id, courseId, title, maxMarks || 10.0, req.user.id);
+    res.json({ success: true, message: 'Quiz created.', quizId: id });
+  } catch (err) {
+    sendErrorResponse(res, err);
+  }
+});
+
+app.post('/api/internal/quizzes/:quizId/:studentId/marks', requireAuth, (req, res) => {
+  const { quizId, studentId } = req.params;
+  const { marksObtained, courseId } = req.body; // Requires courseId in body for auth check
+  if (!courseId) return res.status(400).json({ error: { message: 'courseId required in body' } });
+  if (!checkLockAndFaculty(courseId, req, res)) return;
+
+  try {
+    const id = 'qmark-' + generateUUID();
+    db.prepare(`
+      INSERT INTO quiz_marks (id, quiz_id, student_id, marks_obtained)
+      VALUES (?, ?, ?, ?)
+      ON CONFLICT(quiz_id, student_id) DO UPDATE SET marks_obtained = excluded.marks_obtained
+    `).run(id, quizId, studentId, marksObtained);
+    res.json({ success: true, message: 'Quiz marks updated.' });
+  } catch (err) {
+    sendErrorResponse(res, err);
+  }
+});
+
+app.post('/api/internal/sessional/:courseId/:testNumber/marks', requireAuth, (req, res) => {
+  const { courseId, testNumber } = req.params;
+  const { marksArray } = req.body; // [{studentId, marks}]
+  if (!checkLockAndFaculty(courseId, req, res)) return;
+
+  try {
+    const test = db.prepare('SELECT id FROM sessional_tests WHERE course_id = ? AND test_number = ?').get(courseId, testNumber);
+    if (!test) return res.status(404).json({ error: { message: 'Sessional test not found.' } });
+
+    db.exec('BEGIN TRANSACTION');
+    try {
+      marksArray.forEach(m => {
+        const id = 'smark-' + generateUUID();
+        db.prepare(`
+          INSERT INTO sessional_marks (id, test_id, student_id, marks_obtained)
+          VALUES (?, ?, ?, ?)
+          ON CONFLICT(test_id, student_id) DO UPDATE SET marks_obtained = excluded.marks_obtained
+        `).run(id, test.id, m.studentId, m.marks);
+      });
+      db.exec('COMMIT');
+      res.json({ success: true, message: 'Sessional marks updated in bulk.' });
+    } catch (txnErr) {
+      db.exec('ROLLBACK');
+      throw txnErr;
+    }
+  } catch (err) {
+    sendErrorResponse(res, err);
+  }
+});
+
+app.put('/api/internal/attendance-config/:courseId', requireAuth, (req, res) => {
+  const { courseId } = req.params;
+  const { configs } = req.body; // [{min, max, marks}]
+  if (req.user.role !== 'admin' && !isFacultyAssigned(courseId, req.user.id)) {
+    return res.status(403).json({ error: { message: 'Not authorized to configure attendance for this course.' } });
+  }
+  
+  try {
+    db.exec('BEGIN TRANSACTION');
+    try {
+      db.prepare('DELETE FROM attendance_mark_config WHERE course_id = ?').run(courseId);
+      configs.forEach(c => {
+        const id = 'att-cfg-' + generateUUID();
+        db.prepare('INSERT INTO attendance_mark_config (id, course_id, min_percent, max_percent, marks_awarded) VALUES (?, ?, ?, ?, ?)')
+          .run(id, courseId, c.min, c.max, c.marks);
+      });
+      db.exec('COMMIT');
+      res.json({ success: true, message: 'Attendance config updated.' });
+    } catch (txnErr) {
+      db.exec('ROLLBACK');
+      throw txnErr;
+    }
+  } catch (err) {
+    sendErrorResponse(res, err);
+  }
+});
+
+app.post('/api/internal/bonus/:courseId/:studentId', requireAuth, (req, res) => {
+  const { courseId, studentId } = req.params;
+  const { marks, reason } = req.body;
+  if (!checkLockAndFaculty(courseId, req, res)) return;
+  if (!reason || reason.trim() === '') return res.status(400).json({ error: { message: 'Reason is mandatory for bonus marks.' } });
+  if (marks < 0 || marks > 5) return res.status(400).json({ error: { message: 'Bonus marks must be between 0 and 5.' } });
+
+  try {
+    const id = 'bonus-' + generateUUID();
+    db.prepare('INSERT INTO bonus_marks (id, course_id, student_id, added_by, marks, reason) VALUES (?, ?, ?, ?, ?, ?)')
+      .run(id, courseId, studentId, req.user.id, marks, reason);
+    res.json({ success: true, message: 'Bonus marks added.' });
+  } catch (err) {
+    sendErrorResponse(res, err);
+  }
+});
+
+app.post('/api/internal/lock/:courseId', requireAuth, requireAdmin, (req, res) => {
+  const { courseId } = req.params;
+  try {
+    const id = 'lock-' + generateUUID();
+    db.prepare('INSERT OR IGNORE INTO internal_marks_lock (id, course_id, locked_by) VALUES (?, ?, ?)')
+      .run(id, courseId, req.user.id);
+    logAuditEvent(req.user.email || req.user.id, 'COURSE_LOCKED', `Admin locked internal marks for course ${courseId}`);
+    res.json({ success: true, message: 'Course marks locked.' });
+  } catch (err) {
+    sendErrorResponse(res, err);
+  }
+});
+
+app.delete('/api/internal/lock/:courseId', requireAuth, requireAdmin, (req, res) => {
+  const { courseId } = req.params;
+  const { reason } = req.body;
+  if (!reason) return res.status(400).json({ error: { message: 'Reason required to unlock.' } });
+  try {
+    db.prepare('DELETE FROM internal_marks_lock WHERE course_id = ?').run(courseId);
+    logAuditEvent(req.user.email || req.user.id, 'COURSE_UNLOCKED', `Admin unlocked course ${courseId}. Reason: ${reason}`);
+    res.json({ success: true, message: 'Course marks unlocked.' });
+  } catch (err) {
+    sendErrorResponse(res, err);
+  }
+});
+
+function calculateStudentInternalMarks(courseId, studentId) {
+  let grandTotal = 0;
+  const breakdown = {};
+
+  // 1. Assignments (Total 5 marks)
+  const assignments = db.prepare('SELECT * FROM assignments WHERE course_id = ?').all(courseId);
+  let totalAssignScore = 0;
+  let totalAssignMax = 0;
+  breakdown.assignments = [];
+  
+  assignments.forEach(a => {
+    const sub = db.prepare('SELECT * FROM assignment_submissions WHERE assignment_id = ? AND student_id = ?').get(a.id, studentId);
+    const score = sub && sub.marks_obtained ? sub.marks_obtained : 0;
+    totalAssignScore += score;
+    totalAssignMax += a.max_marks;
+    breakdown.assignments.push({ title: a.title, score, max: a.max_marks });
+  });
+  
+  const assignmentSubtotal = totalAssignMax > 0 ? (totalAssignScore / totalAssignMax) * 5 : 0;
+  breakdown.assignmentSubtotal = Number(assignmentSubtotal.toFixed(2));
+  grandTotal += breakdown.assignmentSubtotal;
+
+  // 2. Quizzes (Total 5 marks, Best 5)
+  const quizzes = db.prepare('SELECT q.id, q.title, q.max_marks, qm.marks_obtained FROM quizzes q LEFT JOIN quiz_marks qm ON q.id = qm.quiz_id AND qm.student_id = ? WHERE q.course_id = ?').all(studentId, courseId);
+  const quizScores = quizzes.map(q => {
+    const max = q.max_marks || 10;
+    const score = q.marks_obtained || 0;
+    return { title: q.title, score, max, normalized: (score / max) * 100 };
+  });
+  quizScores.sort((a, b) => b.normalized - a.normalized); // Descending
+  const topQuizzes = quizScores.slice(0, 5);
+  
+  let totalQuizScore = 0;
+  let totalQuizMax = 0;
+  topQuizzes.forEach(q => {
+    totalQuizScore += q.score;
+    totalQuizMax += q.max;
+  });
+  
+  const quizSubtotal = totalQuizMax > 0 ? (totalQuizScore / totalQuizMax) * 5 : 0;
+  breakdown.quizzes = topQuizzes;
+  breakdown.quizSubtotal = Number(quizSubtotal.toFixed(2));
+  grandTotal += breakdown.quizSubtotal;
+
+  // 3. Sessional Tests (Best 2 of 3, Total 15 marks)
+  const st = db.prepare('SELECT st.id, st.test_number, st.max_marks, sm.marks_obtained FROM sessional_tests st LEFT JOIN sessional_marks sm ON st.id = sm.test_id AND sm.student_id = ? WHERE st.course_id = ?').all(studentId, courseId);
+  const stScores = st.map(s => {
+    const max = s.max_marks;
+    const score = s.marks_obtained || 0;
+    return { test_number: s.test_number, score, max, normalized: (score / max) * 100 };
+  });
+  stScores.sort((a, b) => b.normalized - a.normalized);
+  const top2St = stScores.slice(0, 2);
+  
+  let stAvgNormalized = 0;
+  if (top2St.length > 0) {
+    const sumNorm = top2St.reduce((sum, s) => sum + s.normalized, 0);
+    stAvgNormalized = sumNorm / top2St.length;
+  }
+  const sessionalSubtotal = (stAvgNormalized / 100) * 15;
+  breakdown.sessionals = top2St;
+  breakdown.sessionalSubtotal = Number(sessionalSubtotal.toFixed(2));
+  grandTotal += breakdown.sessionalSubtotal;
+
+  // 4. Attendance
+  const student = db.prepare('SELECT attendance_rate FROM students WHERE id = ?').get(studentId);
+  const attRate = student ? student.attendance_rate : 0;
+  const attConfigs = db.prepare('SELECT * FROM attendance_mark_config WHERE course_id = ?').all(courseId);
+  let attendanceSubtotal = 0;
+  for (const cfg of attConfigs) {
+    if (attRate >= cfg.min_percent && attRate <= cfg.max_percent) {
+      attendanceSubtotal = cfg.marks_awarded;
+      break;
+    }
+  }
+  breakdown.attendanceRate = attRate;
+  breakdown.attendanceSubtotal = attendanceSubtotal;
+  grandTotal += attendanceSubtotal;
+
+  // 5. Bonus
+  const bonuses = db.prepare('SELECT * FROM bonus_marks WHERE course_id = ? AND student_id = ?').all(courseId, studentId);
+  let bonusTotal = bonuses.reduce((sum, b) => sum + b.marks, 0);
+  if (bonusTotal > 5) bonusTotal = 5; // Cap per spec (max 5 per student per course)
+  breakdown.bonuses = bonuses;
+  breakdown.bonusSubtotal = bonusTotal;
+  grandTotal += bonusTotal;
+
+  // Cap Grand Total at 30
+  if (grandTotal > 30) grandTotal = 30;
+  
+  return { breakdown, grandTotal: Number(grandTotal.toFixed(2)) };
+}
+
+app.get('/api/internal/:courseId/:studentId', requireAuth, (req, res) => {
+  const { courseId, studentId } = req.params;
+  try {
+    const result = calculateStudentInternalMarks(courseId, studentId);
+    res.json({ success: true, ...result });
+  } catch (err) {
+    sendErrorResponse(res, err);
+  }
+});
+
+app.get('/api/internal/:courseId', requireAuth, (req, res) => {
+  const { courseId } = req.params;
+  try {
+    const enrolled = db.prepare('SELECT DISTINCT student_id FROM student_grades WHERE course_id = ?').all(courseId);
+    
+    const results = enrolled.map(e => {
+      const p = db.prepare('SELECT first_name, last_name, student_id_number FROM students WHERE id = ?').get(e.student_id);
+      const calc = calculateStudentInternalMarks(courseId, e.student_id);
+      return { studentId: e.student_id, profile: p, ...calc };
+    });
+    
+    res.json({ success: true, students: results, isLocked: isCourseLocked(courseId) });
+  } catch (err) {
+    sendErrorResponse(res, err);
   }
 });
 

@@ -21,6 +21,15 @@ console.log(`Database engine initialized at: ${dbPath}`);
 
 // Force fresh DDL load to populate full working page long mock datasets
 db.exec(`
+  DROP TABLE IF EXISTS internal_marks_lock;
+  DROP TABLE IF EXISTS bonus_marks;
+  DROP TABLE IF EXISTS attendance_mark_config;
+  DROP TABLE IF EXISTS sessional_marks;
+  DROP TABLE IF EXISTS sessional_tests;
+  DROP TABLE IF EXISTS quiz_marks;
+  DROP TABLE IF EXISTS quizzes;
+  DROP TABLE IF EXISTS assignment_submissions;
+  DROP TABLE IF EXISTS assignments;
   DROP TABLE IF EXISTS student_grades;
   DROP TABLE IF EXISTS syllabus_progress;
   DROP TABLE IF EXISTS campus_announcements;
@@ -175,6 +184,96 @@ db.exec(`
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
   );
 
+  CREATE TABLE IF NOT EXISTS assignments (
+    id TEXT PRIMARY KEY,
+    course_id TEXT NOT NULL,
+    title TEXT NOT NULL,
+    max_marks REAL DEFAULT 10.0,
+    created_by TEXT,
+    FOREIGN KEY(course_id) REFERENCES courses(id) ON DELETE CASCADE
+  );
+
+  CREATE TABLE IF NOT EXISTS assignment_submissions (
+    id TEXT PRIMARY KEY,
+    assignment_id TEXT NOT NULL,
+    student_id TEXT NOT NULL,
+    marks_obtained REAL,
+    status TEXT CHECK(status IN ('SUBMITTED', 'MISSING')) DEFAULT 'MISSING',
+    submitted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(assignment_id) REFERENCES assignments(id) ON DELETE CASCADE,
+    FOREIGN KEY(student_id) REFERENCES students(id) ON DELETE CASCADE,
+    UNIQUE(assignment_id, student_id)
+  );
+
+  CREATE TABLE IF NOT EXISTS quizzes (
+    id TEXT PRIMARY KEY,
+    course_id TEXT NOT NULL,
+    title TEXT NOT NULL,
+    max_marks REAL DEFAULT 10.0,
+    conducted_on TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    created_by TEXT,
+    FOREIGN KEY(course_id) REFERENCES courses(id) ON DELETE CASCADE
+  );
+
+  CREATE TABLE IF NOT EXISTS quiz_marks (
+    id TEXT PRIMARY KEY,
+    quiz_id TEXT NOT NULL,
+    student_id TEXT NOT NULL,
+    marks_obtained REAL,
+    FOREIGN KEY(quiz_id) REFERENCES quizzes(id) ON DELETE CASCADE,
+    FOREIGN KEY(student_id) REFERENCES students(id) ON DELETE CASCADE,
+    UNIQUE(quiz_id, student_id)
+  );
+
+  CREATE TABLE IF NOT EXISTS sessional_tests (
+    id TEXT PRIMARY KEY,
+    course_id TEXT NOT NULL,
+    test_number INTEGER CHECK(test_number IN (1, 2, 3)) NOT NULL,
+    max_marks REAL NOT NULL,
+    conducted_on TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(course_id) REFERENCES courses(id) ON DELETE CASCADE,
+    UNIQUE(course_id, test_number)
+  );
+
+  CREATE TABLE IF NOT EXISTS sessional_marks (
+    id TEXT PRIMARY KEY,
+    test_id TEXT NOT NULL,
+    student_id TEXT NOT NULL,
+    marks_obtained REAL,
+    FOREIGN KEY(test_id) REFERENCES sessional_tests(id) ON DELETE CASCADE,
+    FOREIGN KEY(student_id) REFERENCES students(id) ON DELETE CASCADE,
+    UNIQUE(test_id, student_id)
+  );
+
+  CREATE TABLE IF NOT EXISTS attendance_mark_config (
+    id TEXT PRIMARY KEY,
+    course_id TEXT NOT NULL,
+    min_percent REAL NOT NULL,
+    max_percent REAL NOT NULL,
+    marks_awarded REAL NOT NULL,
+    FOREIGN KEY(course_id) REFERENCES courses(id) ON DELETE CASCADE
+  );
+
+  CREATE TABLE IF NOT EXISTS bonus_marks (
+    id TEXT PRIMARY KEY,
+    course_id TEXT NOT NULL,
+    student_id TEXT NOT NULL,
+    added_by TEXT NOT NULL,
+    marks REAL NOT NULL,
+    reason TEXT NOT NULL,
+    added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(course_id) REFERENCES courses(id) ON DELETE CASCADE,
+    FOREIGN KEY(student_id) REFERENCES students(id) ON DELETE CASCADE
+  );
+
+  CREATE TABLE IF NOT EXISTS internal_marks_lock (
+    id TEXT PRIMARY KEY,
+    course_id TEXT UNIQUE NOT NULL,
+    locked_by TEXT NOT NULL,
+    locked_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(course_id) REFERENCES courses(id) ON DELETE CASCADE
+  );
+
   CREATE INDEX IF NOT EXISTS idx_students_user_id ON students(user_id);
   CREATE INDEX IF NOT EXISTS idx_attendance_student_id ON attendance(student_id);
   CREATE INDEX IF NOT EXISTS idx_attendance_schedule_id ON attendance(schedule_id);
@@ -255,6 +354,32 @@ insertCourse.run('cour-01', 'CS-601', 'Automata & Compiler Design', 4, 'CSE', 38
 insertCourse.run('cour-02', 'CS-602', 'Database Management Systems', 3, 'CSE', 45);
 insertCourse.run('cour-03', 'CS-603', 'Information Security Systems', 4, 'CSE', 30);
 insertCourse.run('cour-04', 'CS-604', 'Web Engineering Frameworks', 3, 'CSE', 42);
+
+// 5.1 Seed Internal Marks structure for existing courses
+const coursesList = db.prepare('SELECT id FROM courses').all();
+coursesList.forEach(course => {
+  // Assignments (exactly 5)
+  for (let i = 1; i <= 5; i++) {
+    db.prepare('INSERT OR IGNORE INTO assignments (id, course_id, title, max_marks) VALUES (?, ?, ?, ?)').run(
+      'assign-' + course.id + '-' + i,
+      course.id,
+      'Assignment ' + i,
+      10.0
+    );
+  }
+
+  // Sessional Tests (3 tests)
+  db.prepare('INSERT OR IGNORE INTO sessional_tests (id, course_id, test_number, max_marks) VALUES (?, ?, ?, ?)').run('st1-' + course.id, course.id, 1, 30.0);
+  db.prepare('INSERT OR IGNORE INTO sessional_tests (id, course_id, test_number, max_marks) VALUES (?, ?, ?, ?)').run('st2-' + course.id, course.id, 2, 30.0);
+  db.prepare('INSERT OR IGNORE INTO sessional_tests (id, course_id, test_number, max_marks) VALUES (?, ?, ?, ?)').run('st3-' + course.id, course.id, 3, 40.0);
+
+  // Attendance Config Default
+  const insertConfig = db.prepare('INSERT OR IGNORE INTO attendance_mark_config (id, course_id, min_percent, max_percent, marks_awarded) VALUES (?, ?, ?, ?, ?)');
+  insertConfig.run('att-cfg-1-' + course.id, course.id, 90.0, 100.0, 5.0);
+  insertConfig.run('att-cfg-2-' + course.id, course.id, 80.0, 89.99, 4.0);
+  insertConfig.run('att-cfg-3-' + course.id, course.id, 75.0, 79.99, 3.0);
+  insertConfig.run('att-cfg-4-' + course.id, course.id, 0.0, 74.99, 0.0);
+});
 
 // 6. Seed active classrooms
 insertRoom.run('room-01', 'B-Block Lab 3', 'B-Block Computer Center', 40);
