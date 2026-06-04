@@ -867,6 +867,7 @@ export default function App() {
             handlePostAnnouncement={handlePostAnnouncement}
             handleExportAuditLogs={handleExportAuditLogs}
             pushNotification={pushNotification}
+            currentUser={currentUser}
           />
         )}
 

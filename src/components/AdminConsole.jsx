@@ -36,9 +36,58 @@ export default function AdminConsole({
   handleImportCSVData,
   handlePostAnnouncement,
   handleExportAuditLogs,
-  pushNotification
+  pushNotification,
+  currentUser
 }) {
   const [adminTab, setAdminTab] = useState('students');
+  const [attendanceConfigs, setAttendanceConfigs] = useState({});
+  const [configSaving, setConfigSaving] = useState({});
+
+  // Fetch configs for all courses
+  React.useEffect(() => {
+    if (adminTab === 'attendance' && currentUser) {
+      courses.forEach(c => {
+        fetch(`http://localhost:3000/api/internal/attendance-config/${c.id}`, {
+          headers: { 'x-user-id': currentUser.id, 'x-user-role': currentUser.role }
+        })
+        .then(res => res.json())
+        .then(data => {
+          if (!data.error) {
+            setAttendanceConfigs(prev => ({ ...prev, [c.id]: data }));
+          }
+        })
+        .catch(console.error);
+      });
+    }
+  }, [adminTab, courses, currentUser]);
+
+  const handleConfigChange = (courseId, index, field, value) => {
+    const newConfigs = [...(attendanceConfigs[courseId] || [])];
+    newConfigs[index] = { ...newConfigs[index], [field]: parseFloat(value) || 0 };
+    setAttendanceConfigs(prev => ({ ...prev, [courseId]: newConfigs }));
+  };
+
+  const handleSaveConfig = async (courseId) => {
+    setConfigSaving(prev => ({ ...prev, [courseId]: true }));
+    try {
+      const config = attendanceConfigs[courseId];
+      const res = await fetch(`http://localhost:3000/api/internal/attendance-config/${courseId}`, {
+        method: 'PUT',
+        headers: { 
+          'Content-Type': 'application/json',
+          'x-user-id': currentUser.id,
+          'x-user-role': currentUser.role
+        },
+        body: JSON.stringify({ thresholds: config })
+      });
+      if (!res.ok) throw new Error('Failed to save config');
+      pushNotification('success', 'Attendance mapping configuration saved.');
+    } catch (err) {
+      pushNotification('error', err.message);
+    } finally {
+      setConfigSaving(prev => ({ ...prev, [courseId]: false }));
+    }
+  };
 
   // Dynamic Financial Aggregations
   let csePaid = 0, cseBilled = 0;
@@ -155,6 +204,9 @@ export default function AdminConsole({
         </button>
         <button className={`qclay-subnav-item ${adminTab === 'audit' ? 'active' : ''}`} onClick={() => setAdminTab('audit')}>
           <Lock size={14} aria-hidden="true" /> System Audit Trails
+        </button>
+        <button className={`qclay-subnav-item ${adminTab === 'attendance' ? 'active' : ''}`} onClick={() => setAdminTab('attendance')}>
+          <CheckCircle size={14} aria-hidden="true" /> Attendance Marks Config
         </button>
       </div>
 
@@ -700,6 +752,73 @@ export default function AdminConsole({
               </div>
             ))}
           </div>
+        </div>
+      )}
+
+      {/* Tab 6: Attendance Marks Configuration */}
+      {adminTab === 'attendance' && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '32px' }}>
+          <div>
+            <h3 className="display-title" style={{ fontSize: '20px', marginBottom: '8px' }}>Attendance to Marks Mapping Configuration</h3>
+            <span style={{ fontSize: '12px', color: 'rgba(255,255,255,0.45)' }}>Configure the conversion scale for attendance percentages to internal marks (max 5) per course.</span>
+          </div>
+
+          {courses.map(course => (
+            <div key={course.id} className="qclay-card" style={{ gap: '16px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <h4 style={{ fontSize: '16px', fontWeight: 600, color: '#fff' }}>{course.code} - {course.title}</h4>
+                <button 
+                  className="qclay-btn-pill"
+                  onClick={() => handleSaveConfig(course.id)}
+                  disabled={configSaving[course.id]}
+                >
+                  {configSaving[course.id] ? <RefreshCw className="animate-spin" size={14} /> : <CheckCircle size={14} />}
+                  Save Config
+                </button>
+              </div>
+
+              <div style={{ overflowX: 'auto' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '13px' }}>
+                  <thead>
+                    <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.05)', color: 'rgba(255,255,255,0.45)', fontWeight: 600 }}>
+                      <th style={{ padding: '14px' }}>Min Percentage (%)</th>
+                      <th style={{ padding: '14px' }}>Max Percentage (%)</th>
+                      <th style={{ padding: '14px' }}>Marks Awarded (out of 5)</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(attendanceConfigs[course.id] || []).map((band, idx) => (
+                      <tr key={idx} style={{ borderBottom: '1px solid rgba(255,255,255,0.02)' }}>
+                        <td style={{ padding: '8px 14px' }}>
+                          <input 
+                            type="number" className="qclay-input-capsule" style={{ width: '100px', padding: '6px 12px' }}
+                            value={band.min_percent} onChange={e => handleConfigChange(course.id, idx, 'min_percent', e.target.value)}
+                          />
+                        </td>
+                        <td style={{ padding: '8px 14px' }}>
+                          <input 
+                            type="number" className="qclay-input-capsule" style={{ width: '100px', padding: '6px 12px' }}
+                            value={band.max_percent} onChange={e => handleConfigChange(course.id, idx, 'max_percent', e.target.value)}
+                          />
+                        </td>
+                        <td style={{ padding: '8px 14px' }}>
+                          <input 
+                            type="number" className="qclay-input-capsule" style={{ width: '100px', padding: '6px 12px' }}
+                            value={band.marks_awarded} onChange={e => handleConfigChange(course.id, idx, 'marks_awarded', e.target.value)}
+                          />
+                        </td>
+                      </tr>
+                    ))}
+                    {(!attendanceConfigs[course.id] || attendanceConfigs[course.id].length === 0) && (
+                      <tr>
+                        <td colSpan="3" style={{ padding: '14px', color: 'rgba(255,255,255,0.4)', textAlign: 'center' }}>Loading configuration...</td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          ))}
         </div>
       )}
 

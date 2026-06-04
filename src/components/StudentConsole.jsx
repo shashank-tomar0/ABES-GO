@@ -35,11 +35,63 @@ export default function StudentConsole({
   const [manualScannedToken, setManualScannedToken] = useState('');
   const [qrScanningActive, setQrScanningActive] = useState(false);
 
-  // Filter timetables schedules to show only enrolled courses
+  // Internal Marks State
+  const [internalCourseId, setInternalCourseId] = useState(null);
+  const [internalData, setInternalData] = useState(null);
+  const [internalLoading, setInternalLoading] = useState(false);
+  const [simulatorMode, setSimulatorMode] = useState('standard'); // 'standard' or 'internal'
+  const [internalSimMarks, setInternalSimMarks] = useState({ st1: 0, st2: 0, st3: 0, quiz: 0, asn: 0 });
+
   const studentCourseIds = studentGradesData?.grades?.map(g => g.course_id) || [];
   const studentSchedules = studentCourseIds.length > 0 
     ? schedules.filter(sc => studentCourseIds.includes(sc.course_id))
     : schedules;
+
+  React.useEffect(() => {
+    if (studentCourseIds.length > 0 && !internalCourseId) {
+      setInternalCourseId(studentCourseIds[0]);
+    }
+  }, [studentCourseIds, internalCourseId]);
+
+  React.useEffect(() => {
+    if (internalCourseId && studentTab === 'internal') {
+      setInternalLoading(true);
+      fetch(`http://localhost:3000/api/internal/${internalCourseId}/${currentProfile.id}`, {
+        headers: { 'x-user-id': currentUser.id, 'x-user-role': currentUser.role }
+      })
+      .then(res => res.json())
+      .then(data => {
+        if (!data.error) setInternalData(data);
+      })
+      .catch(console.error)
+      .finally(() => setInternalLoading(false));
+    }
+  }, [internalCourseId, studentTab, currentUser.id, currentProfile.id]);
+
+  const getInternalSimulatedTotal = () => {
+    const { st1, st2, st3, quiz, asn } = internalSimMarks;
+    
+    // Calculate best 2 sessionals
+    const sts = [st1, st2, st3].map((val, i) => ({ 
+      val: Number(val) || 0, 
+      norm: ((Number(val) || 0) / (i === 2 ? 40 : 30)) * 100 
+    })).sort((a, b) => b.norm - a.norm);
+    
+    const sessionalMarks = ((sts[0].norm + sts[1].norm) / 200) * 15;
+    
+    // Quiz and Asn are directly scaled since simulator is just 0-10 or we can treat slider as out of 10 and scale to 5.
+    // Let's treat ASN slider 0-10 -> scale to 5
+    const asnMarks = (Number(asn) / 10) * 5;
+    const quizMarks = (Number(quiz) / 10) * 5;
+    
+    // Add existing attendance and bonus from the actual internal data
+    const attMarks = internalData?.calculation?.summary?.attendance?.awarded || 0;
+    const bonusMarks = internalData?.calculation?.summary?.bonus?.awarded || 0;
+
+    let total = sessionalMarks + asnMarks + quizMarks + attMarks + bonusMarks;
+    if (total > 30) total = 30;
+    return total;
+  };
 
   // Dynamic Chart calculations based on DB grades
   const renderChartPath = () => {
@@ -87,11 +139,22 @@ export default function StudentConsole({
     studentGradesData.grades.forEach(g => {
       const currentSimVal = whatIfMarks[g.course_id] !== undefined ? whatIfMarks[g.course_id] : g.marks_obtained;
       let gp = 0;
-      if (currentSimVal >= 90) gp = 10;
-      else if (currentSimVal >= 80) gp = 9;
-      else if (currentSimVal >= 70) gp = 8;
-      else if (currentSimVal >= 60) gp = 7;
-      else if (currentSimVal >= 50) gp = 6;
+      
+      // If internal mode and this is the active course, replace the marks_obtained with the new calculation (assuming External is out of 70, so we add the external marks to the simulated internal)
+      let marksToUse = currentSimVal;
+      if (simulatorMode === 'internal' && g.course_id === internalCourseId && internalData) {
+        // approximate external marks = actual_marks - actual_internal
+        const actualInternal = internalData?.calculation?.summary?.grandTotal || 0;
+        const estimatedExternal = g.marks_obtained - actualInternal;
+        const newInternal = getInternalSimulatedTotal();
+        marksToUse = estimatedExternal + newInternal;
+      }
+
+      if (marksToUse >= 90) gp = 10;
+      else if (marksToUse >= 80) gp = 9;
+      else if (marksToUse >= 70) gp = 8;
+      else if (marksToUse >= 60) gp = 7;
+      else if (marksToUse >= 50) gp = 6;
       else gp = 5;
 
       totalPoints += gp * g.credits;
@@ -195,6 +258,14 @@ export default function StudentConsole({
           aria-selected={studentTab === 'billing'}
         >
           <CreditCard size={14} aria-hidden="true" /> Tuition Invoices
+        </button>
+        <button 
+          className={`qclay-subnav-item ${studentTab === 'internal' ? 'active' : ''}`} 
+          onClick={() => setStudentTab('internal')} 
+          role="tab"
+          aria-selected={studentTab === 'internal'}
+        >
+          <Award size={14} aria-hidden="true" /> Internal Marks
         </button>
       </div>
 
@@ -549,53 +620,84 @@ export default function StudentConsole({
                   </div>
                 </div>
 
-                {/* Eligibility waiver banner */}
-                <div 
-                  style={{
-                    padding: '12px 16px', 
-                    borderRadius: '16px', 
-                    background: currentSimSgpa >= 8.5 ? 'rgba(16,185,129,0.03)' : 'rgba(255,255,255,0.01)',
-                    border: `1px solid ${currentSimSgpa >= 8.5 ? 'rgba(16,185,129,0.1)' : 'rgba(255,255,255,0.03)'}`,
-                    display: 'flex', 
-                    gap: '10px', 
-                    alignItems: 'center'
-                  }}
-                >
-                  <Smartphone size={15} aria-hidden="true" color={currentSimSgpa >= 8.5 ? '#10b981' : 'rgba(255,255,255,0.4)'} />
-                  <span style={{ fontSize: '11px', color: currentSimSgpa >= 8.5 ? '#10b981' : 'rgba(255,255,255,0.45)', fontWeight: 500 }}>
-                    {currentSimSgpa >= 8.5 
-                      ? "Eligibility waivers met: SGPA standing meets Honours threshold criteria." 
-                      : "Honours warning: Projections below 8.50 CGPA waiver retention limits."
-                    }
-                  </span>
+                <div style={{ display: 'flex', gap: '12px', borderBottom: '1px solid rgba(255,255,255,0.05)', paddingBottom: '12px' }}>
+                  <button 
+                    className={`qclay-btn-pill ${simulatorMode === 'standard' ? '' : 'secondary'}`}
+                    style={{ padding: '6px 14px', fontSize: '11px' }}
+                    onClick={() => setSimulatorMode('standard')}
+                  >
+                    Standard (Overall %)
+                  </button>
+                  <button 
+                    className={`qclay-btn-pill ${simulatorMode === 'internal' ? '' : 'secondary'}`}
+                    style={{ padding: '6px 14px', fontSize: '11px' }}
+                    onClick={() => setSimulatorMode('internal')}
+                    disabled={!internalData}
+                  >
+                    Internal Components Mode
+                  </button>
                 </div>
 
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', maxHeight: '180px', overflowY: 'auto', paddingRight: '4px' }}>
-                  {studentGradesData.grades.map(g => {
-                    const currentSimVal = whatIfMarks[g.course_id] !== undefined ? whatIfMarks[g.course_id] : g.marks_obtained;
-                    return (
-                      <div key={g.id} style={{ background: 'rgba(255,255,255,0.01)', padding: '10px 16px', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.02)' }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', marginBottom: '6px', fontWeight: 600 }}>
-                          <span>{g.code} • {g.title}</span>
-                          <span className="tabular-nums" style={{ color: 'var(--abes-gold)' }}>{currentSimVal}%</span>
+                {simulatorMode === 'internal' && internalData && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', background: 'rgba(255,255,255,0.01)', padding: '16px', borderRadius: '12px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <span style={{ fontSize: '12px', color: 'var(--abes-gold)', fontWeight: 600 }}>Simulating Internal Marks for {courses.find(c => c.id === internalCourseId)?.code}</span>
+                      <strong className="tabular-nums" style={{ fontSize: '16px', color: '#fff' }}>Total: {getInternalSimulatedTotal().toFixed(1)} / 30</strong>
+                    </div>
+
+                    {[
+                      { key: 'st1', label: 'Sessional Test 1', max: 30 },
+                      { key: 'st2', label: 'Sessional Test 2', max: 30 },
+                      { key: 'st3', label: 'Sessional Test 3', max: 40 },
+                      { key: 'quiz', label: 'Quiz Average', max: 10 },
+                      { key: 'asn', label: 'Assignments Average', max: 10 }
+                    ].map(field => (
+                      <div key={field.key}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', marginBottom: '6px', fontWeight: 600, color: 'rgba(255,255,255,0.8)' }}>
+                          <span>{field.label}</span>
+                          <span className="tabular-nums" style={{ color: '#fff' }}>{internalSimMarks[field.key]} / {field.max}</span>
                         </div>
                         <input 
-                          aria-label={`Slide target grade percentage for course ${g.code}`}
-                          type="range" min="30" max="100" value={currentSimVal} 
-                          onChange={e => setWhatIfMarks({ ...whatIfMarks, [g.course_id]: parseInt(e.target.value, 10) })}
-                          style={{ 
-                            width: '100%', 
-                            accentColor: '#ffffff',
-                            height: '4px',
-                            background: 'rgba(255,255,255,0.05)',
-                            borderRadius: '2px',
-                            outline: 'none'
-                          }} 
+                          type="range" min="0" max={field.max} value={internalSimMarks[field.key]} 
+                          onChange={e => setInternalSimMarks({ ...internalSimMarks, [field.key]: parseInt(e.target.value, 10) })}
+                          style={{ width: '100%', accentColor: '#ffffff', height: '4px', background: 'rgba(255,255,255,0.05)', borderRadius: '2px', outline: 'none' }} 
                         />
                       </div>
-                    );
-                  })}
-                </div>
+                    ))}
+                    <div style={{ fontSize: '10px', color: 'rgba(255,255,255,0.4)', marginTop: '4px' }}>
+                      Attendance and Bonus marks are locked to current actual values.
+                    </div>
+                  </div>
+                )}
+
+                {simulatorMode === 'standard' && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', maxHeight: '180px', overflowY: 'auto', paddingRight: '4px' }}>
+                    {studentGradesData.grades.map(g => {
+                      const currentSimVal = whatIfMarks[g.course_id] !== undefined ? whatIfMarks[g.course_id] : g.marks_obtained;
+                      return (
+                        <div key={g.id} style={{ background: 'rgba(255,255,255,0.01)', padding: '10px 16px', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.02)' }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', marginBottom: '6px', fontWeight: 600 }}>
+                            <span>{g.code} • {g.title}</span>
+                            <span className="tabular-nums" style={{ color: 'var(--abes-gold)' }}>{currentSimVal}%</span>
+                          </div>
+                          <input 
+                            aria-label={`Slide target grade percentage for course ${g.code}`}
+                            type="range" min="30" max="100" value={currentSimVal} 
+                            onChange={e => setWhatIfMarks({ ...whatIfMarks, [g.course_id]: parseInt(e.target.value, 10) })}
+                            style={{ 
+                              width: '100%', 
+                              accentColor: '#ffffff',
+                              height: '4px',
+                              background: 'rgba(255,255,255,0.05)',
+                              borderRadius: '2px',
+                              outline: 'none'
+                            }} 
+                          />
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
 
                 <button 
                   className="qclay-btn-pill secondary" 
@@ -606,6 +708,7 @@ export default function StudentConsole({
                       resetObj[g.course_id] = g.marks_obtained;
                     });
                     setWhatIfMarks(resetObj);
+                    setInternalSimMarks({ st1: 0, st2: 0, st3: 0, quiz: 0, asn: 0 });
                     pushNotification('info', 'Simulator reset to permanent registry standing.');
                   }}
                 >
@@ -787,6 +890,123 @@ export default function StudentConsole({
               </div>
             </div>
           )}
+        </div>
+      )}
+
+      {/* Student Tab 6: Internal Marks */}
+      {studentTab === 'internal' && (
+        <div className="qclay-tab-panel" style={{ display: 'flex', flexDirection: 'column', gap: '32px' }}>
+          <div className="qclay-card" style={{ padding: '24px', gap: '20px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '16px' }}>
+              <div>
+                <h3 className="display-title" style={{ fontSize: '20px', marginBottom: '8px' }}>Internal Evaluation Marks</h3>
+                <span style={{ fontSize: '12px', color: 'rgba(255,255,255,0.45)' }}>Continuous assessment breakdown across assignments, quizzes, and sessionals.</span>
+              </div>
+              <div style={{ width: '220px' }}>
+                <select 
+                  className="qclay-input-capsule" 
+                  value={internalCourseId || ''} 
+                  onChange={e => setInternalCourseId(e.target.value)}
+                  style={{ width: '100%', paddingRight: '40px', appearance: 'none' }}
+                >
+                  {courses.filter(c => studentCourseIds.includes(c.id)).map(c => (
+                    <option key={c.id} value={c.id} style={{ background: '#09090d', color: '#fff' }}>{c.code} - {c.title}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            {internalLoading ? (
+              <div style={{ textAlign: 'center', padding: '40px 0' }}><RefreshCw className="animate-spin" size={24} color="var(--abes-gold)" /></div>
+            ) : internalData && internalData.calculation ? (
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '20px' }}>
+                
+                {/* Assignments Card */}
+                <div className="qclay-card" style={{ background: 'rgba(255,255,255,0.01)', border: '1px solid rgba(255,255,255,0.04)' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '12px' }}>
+                    <span style={{ fontSize: '13px', fontWeight: 600, color: '#fff' }}>Assignments</span>
+                    <span className="qclay-badge-pill neutral" style={{ fontSize: '10px' }}>{internalData.calculation.summary.assignments.scaled} / 5</span>
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                    {internalData.calculation.components.assignments.scores.map((s, i) => (
+                      <div key={i} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: 'rgba(255,255,255,0.5)' }}>
+                        <span>A{i+1}</span>
+                        <span className="tabular-nums" style={{ color: '#fff' }}>{s !== null ? s : '0 (MISSING)'}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Quizzes Card */}
+                <div className="qclay-card" style={{ background: 'rgba(255,255,255,0.01)', border: '1px solid rgba(255,255,255,0.04)' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '12px' }}>
+                    <span style={{ fontSize: '13px', fontWeight: 600, color: '#fff' }}>Quizzes (Top 5)</span>
+                    <span className="qclay-badge-pill neutral" style={{ fontSize: '10px' }}>{internalData.calculation.summary.quiz.scaled} / 5</span>
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                    {internalData.calculation.components.quiz.scores.map((q, i) => (
+                      <div key={i} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: 'rgba(255,255,255,0.5)' }}>
+                        <span>{internalData.quizzes?.find(qz => qz.id === q.id)?.title || 'Quiz'}</span>
+                        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                          {q.isTop5 && <span className="qclay-badge-pill success" style={{ fontSize: '8px', padding: '2px 4px' }}>TOP 5</span>}
+                          <span className="tabular-nums" style={{ color: '#fff' }}>{q.marks}</span>
+                        </div>
+                      </div>
+                    ))}
+                    {internalData.calculation.components.quiz.scores.length === 0 && <span style={{ fontSize: '11px', color: 'rgba(255,255,255,0.3)' }}>No quizzes attempted.</span>}
+                  </div>
+                </div>
+
+                {/* Sessionals Card */}
+                <div className="qclay-card" style={{ background: 'rgba(255,255,255,0.01)', border: '1px solid rgba(255,255,255,0.04)' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '12px' }}>
+                    <span style={{ fontSize: '13px', fontWeight: 600, color: '#fff' }}>Sessionals (Best 2)</span>
+                    <span className="qclay-badge-pill neutral" style={{ fontSize: '10px' }}>{internalData.calculation.summary.sessional.scaled} / 15</span>
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                    {[1, 2, 3].map(stNum => {
+                      const max = stNum === 3 ? 40 : 30;
+                      const marks = internalData.calculation.components.sessional.scores.find(s => s.test_number === stNum)?.marks || 0;
+                      const isBest = internalData.calculation.components.sessional.best_tests.some(t => t.test_number === stNum);
+                      return (
+                        <div key={stNum} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: 'rgba(255,255,255,0.5)' }}>
+                          <span>ST {stNum}</span>
+                          <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                            {isBest && <span className="qclay-badge-pill success" style={{ fontSize: '8px', padding: '2px 4px' }}>BEST</span>}
+                            <span className="tabular-nums" style={{ color: '#fff' }}>{marks} / {max}</span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Other Components & Grand Total */}
+                <div className="qclay-card qclay-hologram-glow" style={{ border: '1px solid rgba(255,255,255,0.04)' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px', marginBottom: '12px', fontWeight: 600 }}>
+                    <span style={{ color: '#fff' }}>Attendance</span>
+                    <span className="tabular-nums" style={{ color: '#fff' }}>{internalData.calculation.summary.attendance.awarded} / 5</span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px', marginBottom: '24px', fontWeight: 600 }}>
+                    <span style={{ color: '#fff' }}>Bonus</span>
+                    <span className="tabular-nums" style={{ color: 'var(--abes-gold)' }}>+{internalData.calculation.summary.bonus.awarded}</span>
+                  </div>
+                  
+                  <div style={{ marginTop: 'auto', textAlign: 'center', borderTop: '1px solid rgba(255,255,255,0.05)', paddingTop: '16px' }}>
+                    <span style={{ fontSize: '11px', color: 'rgba(255,255,255,0.4)', fontWeight: 700, letterSpacing: '0.1em' }}>GRAND TOTAL</span>
+                    <div style={{ fontSize: '48px', fontWeight: 800, color: '#fff', marginTop: '8px' }} className="tabular-nums">
+                      {internalData.calculation.summary.grandTotal} <span style={{ fontSize: '20px', color: 'rgba(255,255,255,0.4)' }}>/ 30</span>
+                    </div>
+                  </div>
+                </div>
+
+              </div>
+            ) : (
+              <div style={{ textAlign: 'center', color: 'rgba(255,255,255,0.3)', padding: '40px 0', fontSize: '12px' }}>
+                Internal marks calculation not available.
+              </div>
+            )}
+          </div>
         </div>
       )}
 
