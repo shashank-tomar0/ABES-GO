@@ -31,3 +31,4 @@ my-clone/
 *.db
 server/*.db
 server/abes_erp.db
+**.env

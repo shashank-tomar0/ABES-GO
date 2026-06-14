@@ -348,7 +348,21 @@ export function setupGPSAttendance(app, db, wss) {
     res.json({ success: true });
   });
 
-  // Audit Log
+  // Audit Log - All logs (for Admin GPS Attendance Audit tab)
+  app.get('/api/attendance/audit', (req, res) => {
+    try {
+      const list = db.prepare(`
+        SELECT a.id, a.student_id, a.action AS event_type, a.reason AS description, a.performed_at AS created_at
+        FROM attendance_audit a
+        ORDER BY a.performed_at DESC
+      `).all();
+      res.json({ success: true, logs: list });
+    } catch (err) {
+      res.status(500).json({ error: { message: err.message } });
+    }
+  });
+
+  // Audit Log - Session specific
   app.get('/api/attendance/audit/:sessionId', (req, res) => {
     const list = db.prepare(`
       SELECT a.*, u.email as actor_email

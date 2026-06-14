@@ -468,24 +468,14 @@ export default function AdminConsole({
                                 </div>
                                 <span style={{ fontSize: '12px', display: 'block', marginTop: '4px', fontWeight: 600, color: '#fff' }}>{c?.title}</span>
                                 <span style={{ fontSize: '11px', color: 'rgba(255,255,255,0.4)', display: 'block', marginTop: '6px' }}>Room: {r?.name}</span>
-                          
-      {/* Tab 7: GPS Attendance Audit */}
-      {adminTab === 'gps-audit' && (
-        <AdminGPSAttendanceAudit currentUser={currentUser} />
-      )}
-    </div>
-  );
-})}
+                              </div>
+                            );
+                          })}
                         </div>
                       )}
-                
-      {/* Tab 7: GPS Attendance Audit */}
-      {adminTab === 'gps-audit' && (
-        <AdminGPSAttendanceAudit currentUser={currentUser} />
-      )}
-    </div>
-  );
-})}
+                    </div>
+                  );
+                })}
               </div>
             </div>
           </div>
@@ -534,14 +524,9 @@ export default function AdminConsole({
                           }}
                         >
                           {occupancyVal}
-                    
-      {/* Tab 7: GPS Attendance Audit */}
-      {adminTab === 'gps-audit' && (
-        <AdminGPSAttendanceAudit currentUser={currentUser} />
-      )}
-    </div>
-  );
-})}
+                        </div>
+                      );
+                    })}
                   </div>
                 ))}
               </div>

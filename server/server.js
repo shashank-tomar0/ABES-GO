@@ -1002,17 +1002,29 @@ const checkLockAndFaculty = (courseId, req, res) => {
 
 app.post('/api/internal/assignments/:courseId/:studentId/marks', requireAuth, (req, res) => {
   const { courseId, studentId } = req.params;
-  const { assignmentId, marksObtained } = req.body;
+  const { a1, a2, a3, a4, a5 } = req.body;
   if (!checkLockAndFaculty(courseId, req, res)) return;
 
   try {
-    const id = 'asub-' + generateUUID();
-    db.prepare(`
-      INSERT INTO assignment_submissions (id, assignment_id, student_id, marks_obtained, status)
-      VALUES (?, ?, ?, ?, 'SUBMITTED')
-      ON CONFLICT(assignment_id, student_id) DO UPDATE SET marks_obtained = excluded.marks_obtained, status = 'SUBMITTED', submitted_at = CURRENT_TIMESTAMP
-    `).run(id, assignmentId, studentId, marksObtained);
-    res.json({ success: true, message: 'Assignment marks updated.' });
+    const marks = { a1, a2, a3, a4, a5 };
+    db.exec('BEGIN TRANSACTION');
+    try {
+      for (let i = 1; i <= 5; i++) {
+        const val = marks[`a${i}`];
+        const assignId = `assign-${courseId}-${i}`;
+        const id = 'asub-' + generateUUID();
+        db.prepare(`
+          INSERT INTO assignment_submissions (id, assignment_id, student_id, marks_obtained, status)
+          VALUES (?, ?, ?, ?, ?)
+          ON CONFLICT(assignment_id, student_id) DO UPDATE SET marks_obtained = excluded.marks_obtained, status = excluded.status, submitted_at = CURRENT_TIMESTAMP
+        `).run(id, assignId, studentId, val, val !== null && val !== undefined ? 'SUBMITTED' : 'MISSING');
+      }
+      db.exec('COMMIT');
+      res.json({ success: true, message: 'Assignment marks updated.' });
+    } catch (txnErr) {
+      db.exec('ROLLBACK');
+      throw txnErr;
+    }
   } catch (err) {
     sendErrorResponse(res, err);
   }
@@ -1035,11 +1047,15 @@ app.post('/api/internal/quizzes/:courseId', requireAuth, (req, res) => {
 
 app.post('/api/internal/quizzes/:quizId/:studentId/marks', requireAuth, (req, res) => {
   const { quizId, studentId } = req.params;
-  const { marksObtained, courseId } = req.body; // Requires courseId in body for auth check
-  if (!courseId) return res.status(400).json({ error: { message: 'courseId required in body' } });
-  if (!checkLockAndFaculty(courseId, req, res)) return;
-
+  const marksObtained = req.body.marks !== undefined ? req.body.marks : req.body.marksObtained;
+  
   try {
+    const quiz = db.prepare('SELECT course_id FROM quizzes WHERE id = ?').get(quizId);
+    if (!quiz) return res.status(404).json({ error: { message: 'Quiz not found' } });
+    const courseId = quiz.course_id;
+
+    if (!checkLockAndFaculty(courseId, req, res)) return;
+
     const id = 'qmark-' + generateUUID();
     db.prepare(`
       INSERT INTO quiz_marks (id, quiz_id, student_id, marks_obtained)
@@ -1054,7 +1070,7 @@ app.post('/api/internal/quizzes/:quizId/:studentId/marks', requireAuth, (req, re
 
 app.post('/api/internal/sessional/:courseId/:testNumber/marks', requireAuth, (req, res) => {
   const { courseId, testNumber } = req.params;
-  const { marksArray } = req.body; // [{studentId, marks}]
+  const marksArray = req.body.studentMarks || req.body.marksArray;
   if (!checkLockAndFaculty(courseId, req, res)) return;
 
   try {
@@ -1154,35 +1170,33 @@ app.delete('/api/internal/lock/:courseId', requireAuth, requireAdmin, (req, res)
 
 function calculateStudentInternalMarks(courseId, studentId) {
   let grandTotal = 0;
-  const breakdown = {};
 
   // 1. Assignments (Total 5 marks)
   const assignments = db.prepare('SELECT * FROM assignments WHERE course_id = ?').all(courseId);
   let totalAssignScore = 0;
   let totalAssignMax = 0;
-  breakdown.assignments = [];
+  const assignmentScores = [];
   
   assignments.forEach(a => {
     const sub = db.prepare('SELECT * FROM assignment_submissions WHERE assignment_id = ? AND student_id = ?').get(a.id, studentId);
-    const score = sub && sub.marks_obtained ? sub.marks_obtained : 0;
-    totalAssignScore += score;
+    const score = sub && sub.marks_obtained !== null ? sub.marks_obtained : null;
+    totalAssignScore += (score || 0);
     totalAssignMax += a.max_marks;
-    breakdown.assignments.push({ title: a.title, score, max: a.max_marks });
+    assignmentScores.push(score);
   });
   
   const assignmentSubtotal = totalAssignMax > 0 ? (totalAssignScore / totalAssignMax) * 5 : 0;
-  breakdown.assignmentSubtotal = Number(assignmentSubtotal.toFixed(2));
-  grandTotal += breakdown.assignmentSubtotal;
+  grandTotal += assignmentSubtotal;
 
   // 2. Quizzes (Total 5 marks, Best 5)
   const quizzes = db.prepare('SELECT q.id, q.title, q.max_marks, qm.marks_obtained FROM quizzes q LEFT JOIN quiz_marks qm ON q.id = qm.quiz_id AND qm.student_id = ? WHERE q.course_id = ?').all(studentId, courseId);
   const quizScores = quizzes.map(q => {
     const max = q.max_marks || 10;
     const score = q.marks_obtained || 0;
-    return { title: q.title, score, max, normalized: (score / max) * 100 };
+    return { id: q.id, title: q.title, score, max, normalized: (score / max) * 100 };
   });
-  quizScores.sort((a, b) => b.normalized - a.normalized); // Descending
-  const topQuizzes = quizScores.slice(0, 5);
+  const quizScoresSorted = [...quizScores].sort((a, b) => b.normalized - a.normalized); // Descending
+  const topQuizzes = quizScoresSorted.slice(0, 5);
   
   let totalQuizScore = 0;
   let totalQuizMax = 0;
@@ -1192,9 +1206,14 @@ function calculateStudentInternalMarks(courseId, studentId) {
   });
   
   const quizSubtotal = totalQuizMax > 0 ? (totalQuizScore / totalQuizMax) * 5 : 0;
-  breakdown.quizzes = topQuizzes;
-  breakdown.quizSubtotal = Number(quizSubtotal.toFixed(2));
-  grandTotal += breakdown.quizSubtotal;
+  grandTotal += quizSubtotal;
+
+  const topQuizIds = new Set(topQuizzes.map(tq => tq.id));
+  const quizScoresAll = quizScores.map(q => ({
+    id: q.id,
+    marks: q.score,
+    isTop5: topQuizIds.has(q.id)
+  }));
 
   // 3. Sessional Tests (Best 2 of 3, Total 15 marks)
   const st = db.prepare('SELECT st.id, st.test_number, st.max_marks, sm.marks_obtained FROM sessional_tests st LEFT JOIN sessional_marks sm ON st.id = sm.test_id AND sm.student_id = ? WHERE st.course_id = ?').all(studentId, courseId);
@@ -1203,8 +1222,8 @@ function calculateStudentInternalMarks(courseId, studentId) {
     const score = s.marks_obtained || 0;
     return { test_number: s.test_number, score, max, normalized: (score / max) * 100 };
   });
-  stScores.sort((a, b) => b.normalized - a.normalized);
-  const top2St = stScores.slice(0, 2);
+  const stScoresSorted = [...stScores].sort((a, b) => b.normalized - a.normalized);
+  const top2St = stScoresSorted.slice(0, 2);
   
   let stAvgNormalized = 0;
   if (top2St.length > 0) {
@@ -1212,9 +1231,19 @@ function calculateStudentInternalMarks(courseId, studentId) {
     stAvgNormalized = sumNorm / top2St.length;
   }
   const sessionalSubtotal = (stAvgNormalized / 100) * 15;
-  breakdown.sessionals = top2St;
-  breakdown.sessionalSubtotal = Number(sessionalSubtotal.toFixed(2));
-  grandTotal += breakdown.sessionalSubtotal;
+  grandTotal += sessionalSubtotal;
+
+  const sessionalScoresAll = [1, 2, 3].map(stNum => {
+    const found = stScores.find(s => s.test_number === stNum);
+    return {
+      test_number: stNum,
+      marks: found ? found.score : 0
+    };
+  });
+  const bestSessionalTests = top2St.map(s => ({
+    test_number: s.test_number,
+    marks: s.score
+  }));
 
   // 4. Attendance
   const student = db.prepare('SELECT attendance_rate FROM students WHERE id = ?').get(studentId);
@@ -1227,29 +1256,54 @@ function calculateStudentInternalMarks(courseId, studentId) {
       break;
     }
   }
-  breakdown.attendanceRate = attRate;
-  breakdown.attendanceSubtotal = attendanceSubtotal;
   grandTotal += attendanceSubtotal;
 
   // 5. Bonus
   const bonuses = db.prepare('SELECT * FROM bonus_marks WHERE course_id = ? AND student_id = ?').all(courseId, studentId);
   let bonusTotal = bonuses.reduce((sum, b) => sum + b.marks, 0);
   if (bonusTotal > 5) bonusTotal = 5; // Cap per spec (max 5 per student per course)
-  breakdown.bonuses = bonuses;
-  breakdown.bonusSubtotal = bonusTotal;
   grandTotal += bonusTotal;
 
   // Cap Grand Total at 30
   if (grandTotal > 30) grandTotal = 30;
-  
-  return { breakdown, grandTotal: Number(grandTotal.toFixed(2)) };
+
+  const finalGrandTotal = Number(grandTotal.toFixed(2));
+
+  return {
+    calculation: {
+      summary: {
+        assignments: { scaled: Number(assignmentSubtotal.toFixed(2)) },
+        quiz: { scaled: Number(quizSubtotal.toFixed(2)) },
+        sessional: { scaled: Number(sessionalSubtotal.toFixed(2)) },
+        attendance: { 
+          percent: attRate, 
+          awarded: attendanceSubtotal 
+        },
+        bonus: { awarded: bonusTotal },
+        grandTotal: finalGrandTotal
+      },
+      components: {
+        assignments: { scores: assignmentScores },
+        quiz: { scores: quizScoresAll },
+        sessional: {
+          scores: sessionalScoresAll,
+          best_tests: bestSessionalTests
+        }
+      }
+    },
+    grandTotal: finalGrandTotal
+  };
 }
 
 app.get('/api/internal/:courseId/:studentId', requireAuth, (req, res) => {
   const { courseId, studentId } = req.params;
   try {
     const result = calculateStudentInternalMarks(courseId, studentId);
-    res.json({ success: true, ...result });
+    res.json({
+      success: true,
+      ...result,
+      quizzes: db.prepare('SELECT * FROM quizzes WHERE course_id = ?').all(courseId)
+    });
   } catch (err) {
     sendErrorResponse(res, err);
   }
@@ -1265,8 +1319,47 @@ app.get('/api/internal/:courseId', requireAuth, (req, res) => {
       const calc = calculateStudentInternalMarks(courseId, e.student_id);
       return { studentId: e.student_id, profile: p, ...calc };
     });
+
+    const assignmentsList = enrolled.map(e => {
+      const studentId = e.student_id;
+      const row = { student_id: studentId };
+      for (let i = 1; i <= 5; i++) {
+        const assignId = `assign-${courseId}-${i}`;
+        const sub = db.prepare('SELECT marks_obtained FROM assignment_submissions WHERE assignment_id = ? AND student_id = ?').get(assignId, studentId);
+        row[`a${i}`] = sub ? sub.marks_obtained : null;
+      }
+      return row;
+    });
+
+    const quizzes = db.prepare('SELECT * FROM quizzes WHERE course_id = ?').all(courseId);
+
+    const quizMarks = db.prepare(`
+      SELECT qm.id, qm.quiz_id, qm.student_id, qm.marks_obtained AS marks
+      FROM quiz_marks qm
+      JOIN quizzes q ON qm.quiz_id = q.id
+      WHERE q.course_id = ?
+    `).all(courseId);
+
+    const sessionals = db.prepare(`
+      SELECT st.test_number, sm.student_id, sm.marks_obtained AS marks
+      FROM sessional_marks sm
+      JOIN sessional_tests st ON sm.test_id = st.id
+      WHERE st.course_id = ?
+    `).all(courseId);
+
+    const bonus = db.prepare('SELECT * FROM bonus_marks WHERE course_id = ?').all(courseId);
     
-    res.json({ success: true, students: results, isLocked: isCourseLocked(courseId) });
+    res.json({
+      success: true,
+      students: results,
+      assignments: assignmentsList,
+      quizzes: quizzes,
+      quizMarks: quizMarks,
+      sessionals: sessionals,
+      bonus: bonus,
+      isLocked: isCourseLocked(courseId),
+      is_locked: isCourseLocked(courseId)
+    });
   } catch (err) {
     sendErrorResponse(res, err);
   }
